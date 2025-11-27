@@ -4,7 +4,7 @@ This blueprint has been deployed on Stokenet for testing at package address: `pa
 ## Instantiating a vesting component
 In the current version, the component must be seeded with all XRD at instantiation. We might want to change this, to be possible after instantiation (possibly in trenches). A *pre-claim period* might need to be built still too.
 
-At instantiation, a **fungible** admin badge must be passed (create at https://stokenet-console.radixdlt.com/create-token), along with a `vest_start` and `vest_end` unix timestamp, and an `initial_unvest` fraction (for instance, `0.2` would mean 20% of the total XRD is immediately in the pool, claimable for LP token owners).
+At instantiation, a **fungible** admin badge must be passed (create at https://stokenet-console.radixdlt.com/create-token), along with a `vest_start` and `vest_end` unix timestamp, and an `initial_vest` fraction (for instance, `0.2` would mean 20% of the total XRD is immediately in the pool, claimable for LP token owners).
 
 Instantiation manifest:
 ```
