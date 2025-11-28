@@ -1,6 +1,20 @@
 # Incentives Vester Blueprint
 This blueprint has been deployed on Stokenet for testing at package address: `package_tdx_2_1pk03fls3pdjf5dewt0kewhpx9syyj5vd4wq808sffcq5ghjk7svd4y`
 
+## How this works
+
+The vester distributes tokens to users over time through a vesting schedule. Here's the flow:
+
+1. **Setup phase** - Admin creates the component, fills it with tokens, and calls `finish_setup`. This starts the pre-claim period.
+
+2. **Pre-claim period** - A countdown period (e.g., 1 day) where LP tokens are distributed to user accounts. During this time, tokens are locked and vesting hasn't started yet. Users can't redeem their LP tokens yet.
+
+3. **Vesting period** - After the pre-claim period ends, vesting begins. Tokens gradually unlock over the configured duration (e.g., 30 days). An initial fraction (e.g., 20%) is immediately available. The rest unlocks linearly over time.
+
+4. **Redemption** - Users can redeem their LP tokens at any time during vesting. They receive the vested portion and forfeit the unvested portion. For example, if 50% has vested, redeeming gives 50% of tokens and forfeits the other 50%.
+
+The `refill` method moves vested tokens from the locked vault into the pool, updating LP token values. This happens automatically during redemption but can be called manually to show accurate values in wallets.
+
 ## Admin badges
 The component uses two types of badges:
 - **Super admin badge** - Can perform all admin operations (creating pool units, finishing setup, removing LP/locked tokens)
