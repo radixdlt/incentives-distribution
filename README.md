@@ -32,7 +32,7 @@ Parameters:
 - `initial_vested_fraction` - Fraction immediately accessible (e.g., `Decimal("0.2")` for 20%)
 - `pre_claim_duration_seconds` - Pre-claim period in seconds (e.g., `86400i64` for 1 day)
 - `token_to_vest` - Resource address of token to vest (e.g., XRD)
-- `dapp_definition_address` - Dapp definition address
+- `dapp_definition_address` - Dapp definition address (you don't need to care about this when testing)
 
 Instantiation manifest:
 ```
@@ -40,13 +40,13 @@ CALL_FUNCTION
   Address("package_tdx_2_1pk03fls3pdjf5dewt0kewhpx9syyj5vd4wq808sffcq5ghjk7svd4y")
   "IncentivesVester"
   "instantiate"
-  Address("{admin_badge_address}") # admin badge for backend
-  Address("{super_admin_badge_address}") # super admin badge
+  Address("{admin_badge_address}") # admin badge for backend, create yourself in advance
+  Address("{super_admin_badge_address}") # super admin badge, create yourself in advance
   30i64 # vest duration in days
   Decimal("0.2") # initial vested fraction (20%)
   86400i64 # pre-claim period in seconds (1 day)
   Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD
-  Address("{dapp_definition_address}")
+  Address("{dapp_definition_address}") # No need to care about this when testing
 ;
 
 CALL_METHOD
