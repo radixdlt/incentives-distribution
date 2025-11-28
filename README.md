@@ -7,11 +7,11 @@ The vester distributes tokens to users over time through a vesting schedule. Her
 
 1. **Setup phase** - Admin creates the component, fills it with tokens, and calls `finish_setup`. This starts the pre-claim period.
 
-2. **Pre-claim period** - A countdown period (e.g., 1 day) where LP tokens are distributed to user accounts. During this time, tokens are locked and vesting hasn't started yet. Users can't redeem their LP tokens yet.
+2. **Pre-claim period** - A countdown period (e.g., 7 days) where LP tokens are distributed to user accounts. When this is triggered, tokens are removed from the pool and vesting doesn't start yet. Users can't redeem their LP tokens yet. This protects us from potential attacks, and reduces the impact of them.
 
-3. **Vesting period** - After the pre-claim period ends, vesting begins. Tokens gradually unlock over the configured duration (e.g., 30 days). An initial fraction (e.g., 20%) is immediately available. The rest unlocks linearly over time.
+3. **Vesting period** - After the pre-claim period ends, vesting begins. Tokens gradually unlock over the configured duration (e.g., 1 year). An initial fraction (e.g., 20%) is immediately available. The rest unlocks linearly over time.
 
-4. **Redemption** - Users can redeem their LP tokens at any time during vesting. They receive the vested portion and forfeit the unvested portion. For example, if 50% has vested, redeeming gives 50% of tokens and forfeits the other 50%.
+4. **Redemption** - Users can redeem their LP tokens at any time during vesting. They receive the vested portion and forfeit the unvested portion. For example, if 50% has vested, redeeming gives 50% of tokens and forfeits the other 50%. The forfeited portion goes to the users that still haven't redeemed.
 
 The `refill` method moves vested tokens from the locked vault into the pool, updating LP token values. This happens automatically during redemption but can be called manually to show accurate values in wallets.
 
@@ -167,7 +167,7 @@ CALL_METHOD
 ```
 
 ## Metadata
-The pool units (lp tokens) don't have any metadata (so no name, symbol and icon) on instantiation. We need to use the admin badge to set this (same for the component and locker, and their metadata). This is fine for testing purposes, in my opinion. So I suggest to not care about that for now.
+The pool units (lp tokens) don't have any metadata (so no name, symbol and icon) on instantiation. We need to use the super admin badge to set this (same for the component and locker, and their metadata). This is fine for testing purposes, in my opinion. So I suggest to not care about that for now.
 
 ## Other methods
 - `remove_lp` - Removes all LP tokens from the vault (super admin only)
