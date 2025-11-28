@@ -4,19 +4,28 @@ use scrypto::prelude::*;
 mod incentives_vester {
 
     enable_method_auth! {
+        roles {
+            super_admin => updatable_by: [];
+            admin => updatable_by: [super_admin];
+        },
         methods {
             refill => PUBLIC;
             redeem => PUBLIC;
             get_maturity_value => PUBLIC;
-            claim => restrict_to: [OWNER];
-            remove_lp => restrict_to: [OWNER];
+            get_lp_token_amount => PUBLIC;
+            claim => restrict_to: [super_admin, admin];
+            finish_setup => restrict_to: [super_admin];
+            create_pool_units => restrict_to: [super_admin];
+            remove_lp => restrict_to: [super_admin];
+            put_lp => restrict_to: [super_admin];
+            put_locked_tokens => restrict_to: [super_admin];
+            remove_locked_tokens => restrict_to: [super_admin];
         }
     }
 
     struct IncentivesVester {
         locker: Global<AccountLocker>,
         pool: Global<OneResourcePool>,
-        claimed_users: KeyValueStore<String, ()>,
 
         // LP tokens that represent the user's share of the pool
         lp_tokens_vault: FungibleVault,
@@ -24,98 +33,108 @@ mod incentives_vester {
         // Tokens that are still locked (NOT yet vested into the pool)
         locked_tokens_vault: FungibleVault,
 
-        // Total amount of tokens that went into this vesting schedule
-        initial_token_input: Decimal,
-
         // How many tokens have already vested (i.e. have been moved into the pool)
+        total_tokens_to_vest: Decimal,
         vested_tokens: Decimal,
 
-        vest_start: Instant,
-        vest_end: Instant,
+        // Vest start and end are only set once the vesting has been started
+        vest_start: Option<Instant>,
+        vest_end: Option<Instant>,
 
+        // Duration of the vest, in days
+        vest_duration_days: i64,
+        // Pre claim duration in seconds
+        pre_claim_duration_seconds: i64,
         // Fraction [0, 1] of tokens that are vested immediately at start
         initial_vested_fraction: Decimal,
     }
 
     impl IncentivesVester {
         pub fn instantiate(
-            admin_badge: FungibleBucket,
-            vest_start: Instant,
-            vest_end: Instant,
+            admin_badge_address: ResourceAddress,
+            super_admin_badge_address: ResourceAddress,
+            vest_duration_days: i64,
             initial_vested_fraction: Decimal,
-            tokens_to_vest: FungibleBucket,
+            pre_claim_duration_seconds: i64,
+            token_to_vest: ResourceAddress,
             dapp_def_address: ComponentAddress,
-        ) -> (Global<IncentivesVester>, FungibleBucket) {
+        ) -> Global<IncentivesVester> {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(IncentivesVester::blueprint_id());
 
             assert!(
-                vest_end > vest_start,
-                "vest_end must be strictly after vest_start"
+                vest_duration_days > 0, "Vest duration must be positive"
             );
             assert!(
                 initial_vested_fraction >= Decimal::ZERO && initial_vested_fraction <= Decimal::ONE,
                 "initial_vested_fraction must be between 0 and 1"
             );
+            assert!(pre_claim_duration_seconds >= 0, "Pre-claim period must not have negative duration.");
 
-            let initial_token_input = tokens_to_vest.amount();
-            assert!(
-                initial_token_input > Decimal::ZERO,
-                "tokens_to_vest must be greater than zero"
-            );
-
-            let admin_badge_address = admin_badge.resource_address();
             let admin_access_rule =
-                rule!(require(admin_badge_address) || require(global_caller(component_address)));
-            let admin_owner_role = OwnerRole::Fixed(admin_access_rule.clone());
+                rule!(require(admin_badge_address));
+
+            let super_admin_access_rule = rule!(require(super_admin_badge_address) || require(global_caller(component_address)));
+            let super_admin_owner_role = OwnerRole::Fixed(super_admin_access_rule.clone());
 
             let locker = Blueprint::<AccountLocker>::instantiate(
-                admin_owner_role.clone(),
-                admin_access_rule.clone(),
-                admin_access_rule.clone(),
-                admin_access_rule.clone(),
-                admin_access_rule.clone(),
+                super_admin_owner_role.clone(),
+                super_admin_access_rule.clone(),
+                super_admin_access_rule.clone(),
+                super_admin_access_rule.clone(),
+                super_admin_access_rule.clone(),
                 None,
             );
 
-            let mut pool = Blueprint::<OneResourcePool>::instantiate(
-                admin_owner_role.clone(),
-                admin_access_rule,
-                tokens_to_vest.resource_address(),
+            let pool = Blueprint::<OneResourcePool>::instantiate(
+                super_admin_owner_role.clone(),
+                super_admin_access_rule,
+                token_to_vest,
                 None,
             );
 
-            let (lp_tokens, unvested_tokens) = admin_badge.authorize_with_all(|| {
-                let lp_tokens = pool.contribute(tokens_to_vest);
+            let pool_unit_global_address: GlobalAddress =
+                pool.get_metadata("pool_unit").unwrap().unwrap();
+            let pool_unit_resource_address =
+                ResourceAddress::try_from(pool_unit_global_address).unwrap();
 
-                let unvested_tokens = pool.protected_withdraw(
-                    initial_token_input * (Decimal::ONE - initial_vested_fraction),
-                    WithdrawStrategy::Rounded(RoundingMode::ToZero),
-                );
+            // We can set the metadata of the pool unit here immediately.
+            // But we would need to pass the super_admin_badge at instantiation to allow that.
+            // Let's not for now.
 
-                (lp_tokens, unvested_tokens)
-            });
-
-            let component = Self {
+            Self {
                 locker,
                 pool,
-                lp_tokens_vault: FungibleVault::with_bucket(lp_tokens),
 
-                // Remaining tokens are locked and will vest over time
-                locked_tokens_vault: FungibleVault::with_bucket(unvested_tokens),
+                // Vault that will hold the pool units the users can claim
+                lp_tokens_vault: FungibleVault::new(pool_unit_resource_address),
 
-                initial_token_input,
+                // Vault that will be filled with tokens to vest (that are still unvested)
+                locked_tokens_vault: FungibleVault::new(token_to_vest),
 
                 // Already vested amount = initial immediate vest
-                vested_tokens: initial_token_input * initial_vested_fraction,
+                vested_tokens: Decimal::ZERO,
+                total_tokens_to_vest: Decimal::ZERO,
 
-                vest_start,
-                vest_end,
+                // Vest will only start once all lp tokens have been created. This will them turn into a Some.
+                vest_start: None,
+                vest_end: None,
+
+                // Vesting parameters
+
+                // Duration of vest in days
+                vest_duration_days,
+                // Pre-claim duration in seconds
+                pre_claim_duration_seconds,
+                // Amount of tokens users can immediately access from the start of the vest.
                 initial_vested_fraction,
-                claimed_users: KeyValueStore::new(),
             }
             .instantiate()
-            .prepare_to_globalize(admin_owner_role)
+            .prepare_to_globalize(super_admin_owner_role)
+            .roles(roles! {
+                super_admin => OWNER;
+                admin => admin_access_rule;
+            })
             .with_address(address_reservation)
             .metadata(metadata! {
                 init {
@@ -123,19 +142,51 @@ mod incentives_vester {
                     "dapp_definition" => dapp_def_address, updatable;
                 }
             })
-            .globalize();
+            .globalize()
+        }
 
-            (component, admin_badge)
+        pub fn create_pool_units(&mut self, tokens_to_vest: FungibleBucket) {
+            assert!(self.vest_start.is_none(), "Vesting has already started");
+            
+            self.total_tokens_to_vest += tokens_to_vest.amount();
+            let lp_tokens = self.pool.contribute(tokens_to_vest);
+            self.lp_tokens_vault.put(lp_tokens);
+        }
+
+        pub fn finish_setup(&mut self) {
+            assert!(self.vest_start.is_none(), "Vesting has already started");
+
+            let current_time = Clock::current_time_rounded_to_seconds();
+            let pre_claim_end = current_time.add_seconds(self.pre_claim_duration_seconds).unwrap();
+
+            self.vest_start = Some(pre_claim_end);
+            self.vest_end = Some(pre_claim_end.add_days(self.vest_duration_days).unwrap());
+
+            let tokens_to_unvest = self.pool.get_vault_amount();
+
+            let unvested_tokens = 
+                self.pool.protected_withdraw(
+                    tokens_to_unvest,
+                    WithdrawStrategy::Rounded(RoundingMode::ToZero)
+                );
+
+            self.locked_tokens_vault.put(unvested_tokens);
         }
 
         pub fn refill(&mut self) {
+            if let Some(vest_start) = self.vest_start {
+                assert!(Clock::current_time_is_strictly_after(vest_start, TimePrecision::Second), "Still in pre-claim period. Vesting not started yet.");
+            } else {
+                panic!("Vesting setup not complete yet.");
+            }
+
             let current_time = Clock::current_time_rounded_to_seconds();
 
             let vest_duration =
-                self.vest_end.seconds_since_unix_epoch - self.vest_start.seconds_since_unix_epoch;
+                self.vest_end.unwrap().seconds_since_unix_epoch - self.vest_start.unwrap().seconds_since_unix_epoch;
 
             let elapsed =
-                current_time.seconds_since_unix_epoch - self.vest_start.seconds_since_unix_epoch;
+                current_time.seconds_since_unix_epoch - self.vest_start.unwrap().seconds_since_unix_epoch;
 
             let raw_progress = Decimal::from(elapsed) / Decimal::from(vest_duration);
 
@@ -148,9 +199,7 @@ mod incentives_vester {
             };
 
             // Target total vested amount at this point in time
-            let vested_tokens_target = self.initial_token_input
-                * (self.initial_vested_fraction
-                    + (Decimal::ONE - self.initial_vested_fraction) * vest_progress);
+            let vested_tokens_target = self.total_tokens_to_vest * vest_progress;
 
             let tokens_to_vest_now = vested_tokens_target - self.vested_tokens;
 
@@ -176,20 +225,14 @@ mod incentives_vester {
         pub fn claim(
             &mut self,
             lp_token_amount: Decimal,
-            user_id: String,
             account_address: Global<Account>,
         ) {
+            assert!(self.vest_start.is_some(), "Vesting not set up yet.");
+
             assert!(
                 lp_token_amount > Decimal::ZERO,
                 "LP token amount must be greater than zero"
             );
-
-            assert!(
-                self.claimed_users.get(&user_id).is_none(),
-                "User has already claimed LP tokens"
-            );
-
-            self.claimed_users.insert(user_id, ());
 
             let lp_tokens = self.lp_tokens_vault.take(lp_token_amount);
             self.locker.store(account_address, lp_tokens.into(), true);
@@ -200,6 +243,22 @@ mod incentives_vester {
 
         pub fn remove_lp(&mut self) -> FungibleBucket {
             self.lp_tokens_vault.take_all()
+        }
+
+        pub fn put_lp(&mut self, tokens: FungibleBucket) {
+            self.lp_tokens_vault.put(tokens)
+        }
+
+        pub fn remove_locked_tokens(&mut self) -> FungibleBucket {
+            self.locked_tokens_vault.take_all()
+        }
+
+        pub fn put_locked_tokens(&mut self, tokens: FungibleBucket) {
+            self.locked_tokens_vault.put(tokens)
+        }
+
+        pub fn get_lp_token_amount(&mut self) -> Decimal {
+            self.lp_tokens_vault.amount()
         }
 
         /// Returns the projected value of 1 LP token at full maturity

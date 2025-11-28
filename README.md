@@ -1,58 +1,100 @@
 # Incentives Vester Blueprint
-This blueprint has been deployed on Stokenet for testing at package address: `package_tdx_2_1p4hhfatdepwarwmmnafzq7dv6mv24kz8qleutkkrnx9tdsmnuudhav`
+This blueprint has been deployed on Stokenet for testing at package address: `package_tdx_2_1pk03fls3pdjf5dewt0kewhpx9syyj5vd4wq808sffcq5ghjk7svd4y`
 
-## Instantiating a vesting component
-In the current version, the component must be seeded with all XRD at instantiation. We might want to change this, to be possible after instantiation (possibly in trenches). A *pre-claim period* might need to be built still too.
+## Admin badges
+The component uses two types of badges:
+- **Super admin badge** - Can perform all admin operations (creating pool units, finishing setup, removing LP/locked tokens)
+- **Admin badge** - Can only claim LP tokens for users (held by backend)
 
-At instantiation, a **fungible** admin badge must be passed (create at https://stokenet-console.radixdlt.com/create-token), along with a `vest_start` and `vest_end` unix timestamp, and an `initial_vest` fraction (for instance, `0.2` would mean 20% of the total XRD is immediately in the pool, claimable for LP token owners).
+## Setup sequence
+
+### 1. Instantiate the component
+Create the vester with basic parameters. No tokens required yet.
+
+Parameters:
+- `admin_badge_address` - Address of the admin badge (for backend claiming)
+- `super_admin_badge_address` - Address of the super admin badge
+- `vest_duration_days` - How many days the vest lasts (e.g., `30i64` for 30 days)
+- `initial_vested_fraction` - Fraction immediately accessible (e.g., `Decimal("0.2")` for 20%)
+- `pre_claim_duration_seconds` - Pre-claim period in seconds (e.g., `86400i64` for 1 day)
+- `token_to_vest` - Resource address of token to vest (e.g., XRD)
+- `dapp_definition_address` - Dapp definition address
 
 Instantiation manifest:
 ```
-CALL_METHOD
-  Address("{your_account_address_that_holds_the_xrd_rewards}")
-  "withdraw"
-  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # This is XRD
-  Decimal("10000")
-;
-
-TAKE_ALL_FROM_WORKTOP
-  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # This is XRD
-  Bucket("rewards")
-;
-
-CALL_METHOD
-  Address("{your_account_address_that_holds_the_admin_badge}")
-  "withdraw"
-  Address("{admin_badge_address}") # Create this yourself
-  Decimal("1")
-;
-
-TAKE_ALL_FROM_WORKTOP
-  Address("{admin_badge_address}")
-  Bucket("admin_badge")
-;
-
 CALL_FUNCTION
-  Address("package_tdx_2_1p4hhfatdepwarwmmnafzq7dv6mv24kz8qleutkkrnx9tdsmnuudhav")
+  Address("package_tdx_2_1pk03fls3pdjf5dewt0kewhpx9syyj5vd4wq808sffcq5ghjk7svd4y")
   "IncentivesVester"
   "instantiate"
-  Bucket("admin_badge")
-  1764241121i64 # unix timestamp, vest start
-  1766833121i64 # unix timestamp, vest end
-  Decimal("0.2") # initial vest (20% immediately claimable at vest start here)
-  Bucket("rewards")
-  Address("{dapp_definition_address}") # for testing, feel free to use a random account address, it doesn't matter
+  Address("{admin_badge_address}") # admin badge for backend
+  Address("{super_admin_badge_address}") # super admin badge
+  30i64 # vest duration in days
+  Decimal("0.2") # initial vested fraction (20%)
+  86400i64 # pre-claim period in seconds (1 day)
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD
+  Address("{dapp_definition_address}")
 ;
 
 CALL_METHOD
-  Address("{your_account_address}") # this will get back the admin badge
+  Address("{your_account_address}")
   "deposit_batch"
   Expression("ENTIRE_WORKTOP")
 ;
 ```
 
+### 2. Fill the pool with tokens
+Add tokens to create LP tokens. Can be done multiple times before finishing setup.
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "withdraw"
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD
+  Decimal("10000")
+;
+
+TAKE_ALL_FROM_WORKTOP
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc")
+  Bucket("rewards")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "create_pool_units"
+  Bucket("rewards")
+;
+```
+
+### 3. Finish setup (starts pre-claim period)
+This removes tokens from the pool and starts the pre-claim countdown. After the pre-claim period ends, vesting begins.
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "finish_setup"
+;
+```
+
 ## Claiming LP
-To claim LP for a user, we need to sign the transaction for them. We should use this manifest:
+During the pre-claim period, LP tokens can be claimed and sent to user accounts. The backend holds the admin badge to perform this operation.
+
+Manifest:
 ```
 CALL_METHOD
   Address("{account_that_holds_admin_badge}")
@@ -65,12 +107,14 @@ CALL_METHOD
   Address("{incentives_vester_component_address}")
   "claim"
   Decimal("{amount_of_lp_tokens_to_distribute}")
-  Address("{account_to_give_lp_tokens}")
+  Address("{user_account_address}")
 ;
 ```
 
 ## Redeem
-If the user wants to claim their already vested tokens (and forfeit the other portion), they can use this manifest:
+After the pre-claim period ends and vesting begins, users can redeem their LP tokens for the vested portion of tokens. The unvested portion is forfeited.
+
+Manifest:
 ```
 CALL_METHOD
   Address("{user_account}")
@@ -98,7 +142,7 @@ CALL_METHOD
 ```
 
 ## Refill
-The tokens aren't vested automatically, so to show the correct amount of vested tokens in the pool unit, in the wallet, we need to call the refill method. This method is automatically called in the above redeem manifest, so it's not needed to add there. This is purely to have an accurate representation of the worth of the LP tokens in the wallet. We might want to call it once an hour (or less).
+Tokens vest over time but aren't automatically moved into the pool. Call `refill` to update the pool with vested tokens. This is automatically called during redemption, but can be called manually to show accurate LP token value in wallets.
 
 Manifest:
 ```
@@ -110,3 +154,11 @@ CALL_METHOD
 
 ## Metadata
 The pool units (lp tokens) don't have any metadata (so no name, symbol and icon) on instantiation. We need to use the admin badge to set this (same for the component and locker, and their metadata). This is fine for testing purposes, in my opinion. So I suggest to not care about that for now.
+
+## Other methods
+- `remove_lp` - Removes all LP tokens from the vault (super admin only)
+- `put_lp` - Puts LP tokens back into the vault (super admin only)
+- `remove_locked_tokens` - Removes all locked (unvested) tokens from the vault (super admin only)
+- `put_locked_tokens` - Puts locked tokens back into the vault (super admin only)
+- `get_lp_token_amount` - Returns the amount of LP tokens currently in the vault (public)
+- `get_maturity_value` - Returns the projected value of 1 LP token at full maturity (public)
