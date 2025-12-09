@@ -1,2 +1,4 @@
 scrypto/target
 scrypto/coverage
+scrypto/dummy_account/target
+scrypto/dummy_account/coverage

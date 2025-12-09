@@ -13,6 +13,12 @@ mod incentives_vester {
             redeem => PUBLIC;
             get_maturity_value => PUBLIC;
             get_lp_token_amount => PUBLIC;
+            get_pool_vault_amount => PUBLIC;
+            get_locked_vault_amount => PUBLIC;
+            get_pool_unit_resource_address => PUBLIC;
+            get_pool_redemption_value => PUBLIC;
+            get_vested_tokens => PUBLIC;
+            get_total_tokens_to_vest => PUBLIC;
             claim => restrict_to: [super_admin, admin];
             finish_setup => restrict_to: [super_admin];
             create_pool_units => restrict_to: [super_admin];
@@ -62,19 +68,21 @@ mod incentives_vester {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(IncentivesVester::blueprint_id());
 
-            assert!(
-                vest_duration_days > 0, "Vest duration must be positive"
-            );
+            assert!(vest_duration_days > 0, "Vest duration must be positive");
             assert!(
                 initial_vested_fraction >= Decimal::ZERO && initial_vested_fraction <= Decimal::ONE,
                 "initial_vested_fraction must be between 0 and 1"
             );
-            assert!(pre_claim_duration_seconds >= 0, "Pre-claim period must not have negative duration.");
+            assert!(
+                pre_claim_duration_seconds >= 0,
+                "Pre-claim period must not have negative duration."
+            );
 
-            let admin_access_rule =
-                rule!(require(admin_badge_address));
+            let admin_access_rule = rule!(require(admin_badge_address));
 
-            let super_admin_access_rule = rule!(require(super_admin_badge_address) || require(global_caller(component_address)));
+            let super_admin_access_rule = rule!(
+                require(super_admin_badge_address) || require(global_caller(component_address))
+            );
             let super_admin_owner_role = OwnerRole::Fixed(super_admin_access_rule.clone());
 
             let locker = Blueprint::<AccountLocker>::instantiate(
@@ -147,8 +155,11 @@ mod incentives_vester {
 
         pub fn create_pool_units(&mut self, tokens_to_vest: FungibleBucket) {
             assert!(self.vest_start.is_none(), "Vesting has already started");
-            
-            self.total_tokens_to_vest += tokens_to_vest.amount();
+
+            // Track the actual amount of tokens contributed
+            let amount = tokens_to_vest.amount();
+            self.total_tokens_to_vest += amount;
+
             let lp_tokens = self.pool.contribute(tokens_to_vest);
             self.lp_tokens_vault.put(lp_tokens);
         }
@@ -157,36 +168,40 @@ mod incentives_vester {
             assert!(self.vest_start.is_none(), "Vesting has already started");
 
             let current_time = Clock::current_time_rounded_to_seconds();
-            let pre_claim_end = current_time.add_seconds(self.pre_claim_duration_seconds).unwrap();
+            let pre_claim_end = current_time
+                .add_seconds(self.pre_claim_duration_seconds)
+                .unwrap();
 
             self.vest_start = Some(pre_claim_end);
             self.vest_end = Some(pre_claim_end.add_days(self.vest_duration_days).unwrap());
 
             let tokens_to_unvest = self.pool.get_vault_amount();
 
-            let unvested_tokens = 
-                self.pool.protected_withdraw(
-                    tokens_to_unvest,
-                    WithdrawStrategy::Rounded(RoundingMode::ToZero)
-                );
+            let unvested_tokens = self.pool.protected_withdraw(
+                tokens_to_unvest,
+                WithdrawStrategy::Rounded(RoundingMode::ToZero),
+            );
 
             self.locked_tokens_vault.put(unvested_tokens);
         }
 
         pub fn refill(&mut self) {
             if let Some(vest_start) = self.vest_start {
-                assert!(Clock::current_time_is_strictly_after(vest_start, TimePrecision::Second), "Still in pre-claim period. Vesting not started yet.");
+                assert!(
+                    Clock::current_time_is_at_or_after(vest_start, TimePrecision::Second),
+                    "Still in pre-claim period. Vesting not started yet."
+                );
             } else {
                 panic!("Vesting setup not complete yet.");
             }
 
             let current_time = Clock::current_time_rounded_to_seconds();
 
-            let vest_duration =
-                self.vest_end.unwrap().seconds_since_unix_epoch - self.vest_start.unwrap().seconds_since_unix_epoch;
+            let vest_duration = self.vest_end.unwrap().seconds_since_unix_epoch
+                - self.vest_start.unwrap().seconds_since_unix_epoch;
 
-            let elapsed =
-                current_time.seconds_since_unix_epoch - self.vest_start.unwrap().seconds_since_unix_epoch;
+            let elapsed = current_time.seconds_since_unix_epoch
+                - self.vest_start.unwrap().seconds_since_unix_epoch;
 
             let raw_progress = Decimal::from(elapsed) / Decimal::from(vest_duration);
 
@@ -198,8 +213,15 @@ mod incentives_vester {
                 raw_progress
             };
 
+            // Apply initial vested fraction + linear vesting of the remainder
+            // At vest_start (progress = 0): initial_vested_fraction is available
+            // At vest_end (progress = 1): 100% is available
+            // Formula: initial + (1 - initial) * progress
+            let vested_fraction = self.initial_vested_fraction
+                + (Decimal::ONE - self.initial_vested_fraction) * vest_progress;
+
             // Target total vested amount at this point in time
-            let vested_tokens_target = self.total_tokens_to_vest * vest_progress;
+            let vested_tokens_target = self.total_tokens_to_vest * vested_fraction;
 
             let tokens_to_vest_now = vested_tokens_target - self.vested_tokens;
 
@@ -210,6 +232,8 @@ mod incentives_vester {
             let tokens = self.locked_tokens_vault.take(tokens_to_vest_now);
             self.pool.protected_deposit(tokens);
 
+            // Update vested_tokens to match our calculated target
+            // Don't rely on pool.get_vault_amount() which may have rounding
             self.vested_tokens = vested_tokens_target;
         }
 
@@ -222,11 +246,7 @@ mod incentives_vester {
             self.pool.redeem(lp_token_bucket)
         }
 
-        pub fn claim(
-            &mut self,
-            lp_token_amount: Decimal,
-            account_address: Global<Account>,
-        ) {
+        pub fn claim(&mut self, lp_token_amount: Decimal, account_address: Global<Account>) {
             assert!(self.vest_start.is_some(), "Vesting not set up yet.");
 
             assert!(
@@ -276,6 +296,30 @@ mod incentives_vester {
             let maturity_factor = final_token_amount / current_unlocked_amount;
 
             maturity_factor * current_redemption_value
+        }
+
+        pub fn get_pool_vault_amount(&mut self) -> Decimal {
+            self.pool.get_vault_amount()
+        }
+
+        pub fn get_locked_vault_amount(&mut self) -> Decimal {
+            self.locked_tokens_vault.amount()
+        }
+
+        pub fn get_pool_unit_resource_address(&self) -> ResourceAddress {
+            self.lp_tokens_vault.resource_address()
+        }
+
+        pub fn get_pool_redemption_value(&self, lp_amount: Decimal) -> Decimal {
+            self.pool.get_redemption_value(lp_amount)
+        }
+
+        pub fn get_vested_tokens(&self) -> Decimal {
+            self.vested_tokens
+        }
+
+        pub fn get_total_tokens_to_vest(&self) -> Decimal {
+            self.total_tokens_to_vest
         }
     }
 }
