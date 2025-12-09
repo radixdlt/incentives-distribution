@@ -232,8 +232,6 @@ mod incentives_vester {
             let tokens = self.locked_tokens_vault.take(tokens_to_vest_now);
             self.pool.protected_deposit(tokens);
 
-            // Update vested_tokens to match our calculated target
-            // Don't rely on pool.get_vault_amount() which may have rounding
             self.vested_tokens = vested_tokens_target;
         }
 
