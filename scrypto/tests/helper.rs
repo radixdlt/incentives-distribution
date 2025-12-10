@@ -4,6 +4,9 @@ use incentives_vester::incentives_vester_test::*;
 use dummy_account::incentives_vester_test::*;
 use scrypto_test::prelude::*;
 
+/// Standard tolerance for approximate decimal comparisons in tests
+pub const TOLERANCE: Decimal = dec!("0.000000000000001");
+
 pub struct Helper {
     pub env: TestEnvironment<InMemorySubstateDatabase>,
     pub package_address: PackageAddress,

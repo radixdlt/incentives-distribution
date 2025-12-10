@@ -159,7 +159,7 @@ fn test_refill_vault_contents_at_checkpoints() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         pool_0,
         dec!("1000"),
-        dec!("0.000000000000001"),
+        helper::TOLERANCE,
         "pool at vest_start",
     );
     assert_eq!(pool_0 + locked_0_after, dec!("10000"));
@@ -179,7 +179,7 @@ fn test_refill_vault_contents_at_checkpoints() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         pool_25,
         expected_25,
-        dec!("0.000000000000001"),
+        helper::TOLERANCE,
         "25% progress pool amount",
     );
     assert_eq!(pool_25 + locked_25, dec!("10000"));
@@ -200,7 +200,7 @@ fn test_refill_vault_contents_at_checkpoints() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         pool_50,
         expected_50,
-        dec!("0.000000000000001"),
+        helper::TOLERANCE,
         "50% progress pool amount",
     );
     assert_eq!(pool_50 + locked_50, dec!("10000"));
@@ -275,7 +275,7 @@ fn test_maturity_value_with_no_redemptions() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         maturity_value,
         dec!("1"),
-        dec!("0.000000000000000001"),
+        helper::TOLERANCE,
         "initial maturity value",
     );
 
@@ -288,7 +288,7 @@ fn test_maturity_value_with_no_redemptions() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         maturity_50,
         dec!("1"),
-        dec!("0.000000000000000001"),
+        helper::TOLERANCE,
         "maturity at 50% vesting",
     );
 
@@ -301,7 +301,7 @@ fn test_maturity_value_with_no_redemptions() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         maturity_100,
         dec!("1"),
-        dec!("0.000000000000000001"),
+        helper::TOLERANCE,
         "maturity at 100% vesting",
     );
 
@@ -330,7 +330,7 @@ fn test_redeem_half_doubles_maturity() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         maturity_before,
         dec!("1"),
-        dec!("0.000000000000000001"),
+        helper::TOLERANCE,
         "maturity before redemption",
     );
 
@@ -347,7 +347,7 @@ fn test_redeem_half_doubles_maturity() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         redeemed_amount,
         expected_redeemed,
-        dec!("0.000000000000000001"),
+        helper::TOLERANCE,
         "redeemed amount",
     );
 
@@ -369,14 +369,14 @@ fn test_redeem_half_doubles_maturity() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         maturity_after,
         expected_maturity,
-        dec!("0.0000001"),
+        helper::TOLERANCE,
         "maturity after 50% redemption",
     );
 
     helper::assert_approx_eq(
         expected_maturity,
         expected_maturity_2,
-        dec!("0.0000001"),
+        helper::TOLERANCE,
         "maturity after 50% redemption",
     );
 
@@ -401,7 +401,7 @@ fn test_redemption_amounts_at_vesting_stages() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         pool_at_0,
         dec!("1000"),
-        dec!("0.000000000000001"),
+        helper::TOLERANCE,
         "pool at 0% progress",
     );
 
@@ -416,7 +416,7 @@ fn test_redemption_amounts_at_vesting_stages() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         redeemed_amount_0,
         expected_redeemed_0,
-        dec!("0.0000001"),
+        helper::TOLERANCE,
         "redeemed at 0% progress",
     );
 
@@ -434,7 +434,7 @@ fn test_redemption_amounts_at_vesting_stages() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         pool_at_50,
         dec!("5300"),
-        dec!("0.000000001"),
+        helper::TOLERANCE,
         "pool at 50% progress",
     );
 
@@ -450,7 +450,7 @@ fn test_redemption_amounts_at_vesting_stages() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         redeemed_amount_50,
         expected_redeemed_50,
-        dec!("0.000000001"),
+        helper::TOLERANCE,
         "redeemed at 50% progress",
     );
 
@@ -468,7 +468,7 @@ fn test_redemption_amounts_at_vesting_stages() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         pool_at_100,
         dec!("8475"),
-        dec!("0.000000001"),
+        helper::TOLERANCE,
         "pool at 100% progress",
     );
 
@@ -477,7 +477,7 @@ fn test_redemption_amounts_at_vesting_stages() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         locked_at_100,
         dec!("0"),
-        dec!("0.000000001"),
+        helper::TOLERANCE,
         "locked at 100% progress",
     );
 
@@ -494,7 +494,7 @@ fn test_redemption_amounts_at_vesting_stages() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         redeemed_amount_100,
         expected_redeemed_100,
-        dec!("0.000000001"),
+        helper::TOLERANCE,
         "redeemed at 100% progress",
     );
 
@@ -531,7 +531,7 @@ fn test_vesting_math_after_redemption() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         pool_at_50_no_redeem,
         dec!("5500"),
-        dec!("0.000000001"),
+        helper::TOLERANCE,
         "pool at 50% without redemption",
     );
     assert_eq!(pool_at_50_no_redeem + locked_at_50_no_redeem, dec!("10000"));
@@ -575,7 +575,7 @@ fn test_redeem_75_percent_quadruples_maturity() -> Result<(), RuntimeError> {
     helper::assert_approx_eq(
         maturity_after,
         expected_maturity,
-        dec!("0.0000001"),
+        helper::TOLERANCE,
         "maturity after 75% redemption",
     );
 

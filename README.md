@@ -166,13 +166,172 @@ CALL_METHOD
 ;
 ```
 
+## Super Admin Operations
+These methods allow the super admin to withdraw tokens from the smart contract. Use these with extreme caution as they can affect user balances.
+
+### Remove LP Tokens
+Withdraws all LP tokens from the component's internal vault. This does NOT affect LP tokens already claimed by users.
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "remove_lp"
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "deposit_batch"
+  Expression("ENTIRE_WORKTOP")
+;
+```
+
+### Remove Locked Tokens
+Withdraws all locked (unvested) tokens from the component. This will affect future vesting.
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "remove_locked_tokens"
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "deposit_batch"
+  Expression("ENTIRE_WORKTOP")
+;
+```
+
+### Withdraw from Pool
+To withdraw tokens from the pool itself, use the native `OneResourcePool` method `protected_withdraw`. This requires the super admin badge.
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "get_pool_vault_amount"
+;
+
+# Use the amount from the previous call
+CALL_METHOD
+  Address("{pool_address}")
+  "protected_withdraw"
+  Decimal("{amount_to_withdraw}")
+  Enum<WithdrawStrategy::Rounded>(Enum<RoundingMode::ToZero>())
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "deposit_batch"
+  Expression("ENTIRE_WORKTOP")
+;
+```
+
 ## Metadata
 The pool units (lp tokens) don't have any metadata (so no name, symbol and icon) on instantiation. We need to use the super admin badge to set this (same for the component and locker, and their metadata). This is fine for testing purposes, in my opinion. So I suggest to not care about that for now.
 
 ## Other methods
-- `remove_lp` - Removes all LP tokens from the vault (super admin only)
-- `put_lp` - Puts LP tokens back into the vault (super admin only)
-- `remove_locked_tokens` - Removes all locked (unvested) tokens from the vault (super admin only)
-- `put_locked_tokens` - Puts locked tokens back into the vault (super admin only)
-- `get_lp_token_amount` - Returns the amount of LP tokens currently in the vault (public)
-- `get_maturity_value` - Returns the projected value of 1 LP token at full maturity (public)
+
+### Put LP Tokens Back
+Returns LP tokens to the component's internal vault (super admin only).
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "withdraw"
+  Address("{lp_token_address}")
+  Decimal("{amount}")
+;
+
+TAKE_ALL_FROM_WORKTOP
+  Address("{lp_token_address}")
+  Bucket("lp_tokens")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "put_lp"
+  Bucket("lp_tokens")
+;
+```
+
+### Put Locked Tokens Back
+Returns locked tokens to the component's vault (super admin only).
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "withdraw"
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD or your token
+  Decimal("{amount}")
+;
+
+TAKE_ALL_FROM_WORKTOP
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc")
+  Bucket("tokens")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "put_locked_tokens"
+  Bucket("tokens")
+;
+```
+
+### Query Methods (Public)
+These methods can be called by anyone to get information about the vesting state:
+
+- `get_lp_token_amount` - Returns the amount of LP tokens currently in the component's internal vault
+- `get_maturity_value` - Returns the projected value of 1 LP token at full maturity (when all tokens are vested)
+- `get_pool_vault_amount` - Returns the amount of tokens currently in the pool (available for redemption)
+- `get_locked_vault_amount` - Returns the amount of tokens still locked (not yet vested)
+- `get_pool_unit_resource_address` - Returns the resource address of the LP tokens
+- `get_pool_redemption_value` - Returns the current redemption value for a given amount of LP tokens
+- `get_vested_tokens` - Returns the total amount of tokens that have been vested so far
+- `get_total_tokens_to_vest` - Returns the total amount of tokens that will be vested over the entire vesting period
+
+Example manifest for query methods:
+```
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "get_maturity_value"
+;
+```
