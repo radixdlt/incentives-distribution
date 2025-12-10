@@ -1,5 +1,5 @@
 # Incentives Vester Blueprint
-This blueprint has been deployed on Stokenet for testing at package address: `package_tdx_2_1pk03fls3pdjf5dewt0kewhpx9syyj5vd4wq808sffcq5ghjk7svd4y`
+This blueprint has been deployed on Stokenet for testing at package address: `package_rdx1phe8ngw6fjahenrg9l5z548ve7u7z60a0pq98vkh6p2wf253xd6uh0`
 
 ## How this works
 
