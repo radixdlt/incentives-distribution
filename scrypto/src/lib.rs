@@ -1,7 +1,125 @@
 use scrypto::prelude::*;
 
+/// An enum storing the vesting configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, ScryptoSbor, ManifestSbor)]
+pub enum VestingConfiguration {
+    /// Vesting has not yet been initialized and there isn't yet a known vesting
+    /// start or end [`Instant`] known. Vesting status remains [`Uninitialized`]
+    /// until the `finish_setup` method is called on the vesting component.
+    Uninitialized,
+
+    /// An initialized vesting configuration containing the time at which
+    /// vesting begins, the time at which vesting ends, and other information
+    /// useful for vesting.
+    Initialized {
+        /// The instant when vesting begins. This is set when `finish_setup` is
+        /// called and equals the current time plus the pre-claim duration.
+        vest_start: Instant,
+
+        /// The instant when vesting ends and all tokens are fully vested. This
+        /// is calculated as `vest_start` plus `vest_duration_days` and is set
+        /// when `finish_setup` is called. This is strictly greater than or
+        /// equal to `vest_start` and can never be smaller.
+        vest_end: Instant,
+    },
+}
+
+impl VestingConfiguration {
+    /// Creates a new uninitialized vesting configuration.
+    ///
+    /// This is the initial state before `finish_setup` is called on the
+    /// vesting component.
+    pub const fn new_uninitialized() -> Self {
+        Self::Uninitialized
+    }
+
+    /// Creates a new initialized vesting configuration with the given start
+    /// and end times.
+    ///
+    /// # Arguments
+    ///
+    /// - `vest_start`: The instant when vesting begins.
+    /// - `vest_end`: The instant when vesting ends.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `vest_end < vest_start`.
+    pub fn new_initialized(vest_start: Instant, vest_end: Instant) -> Self {
+        assert!(
+            vest_end.seconds_since_unix_epoch >= vest_start.seconds_since_unix_epoch,
+            "vest_end must be >= vest_start"
+        );
+        Self::Initialized {
+            vest_start,
+            vest_end,
+        }
+    }
+
+    /// Asserts that vesting is uninitialized.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vesting has already been initialized.
+    pub fn assert_vesting_is_uninitialized(&self) {
+        assert!(
+            matches!(self, Self::Uninitialized),
+            "Vesting has already been initialized"
+        );
+    }
+
+    /// Asserts that vesting is initialized.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vesting has not been initialized yet.
+    pub fn assert_vesting_is_initialized(&self) {
+        assert!(
+            matches!(self, Self::Initialized { .. }),
+            "Vesting has not been initialized yet"
+        );
+    }
+
+    /// Asserts that vesting has started (i.e., we are past the pre-claim period).
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - Vesting has not been initialized yet
+    /// - The current time is before `vest_start` (still in pre-claim period)
+    pub fn assert_vesting_has_started(&self) {
+        match self {
+            Self::Uninitialized => {
+                panic!("Vesting setup not complete yet.");
+            }
+            Self::Initialized { vest_start, .. } => {
+                assert!(
+                    Clock::current_time_is_at_or_after(*vest_start, TimePrecision::Second),
+                    "Still in pre-claim period. Vesting not started yet."
+                );
+            }
+        }
+    }
+
+    /// Returns the vest start and end times if initialized.
+    ///
+    /// # Returns
+    ///
+    /// - `Some((vest_start, vest_end))` if initialized
+    /// - `None` if uninitialized
+    pub const fn get_times(&self) -> Option<(Instant, Instant)> {
+        match self {
+            Self::Uninitialized => None,
+            Self::Initialized {
+                vest_start,
+                vest_end,
+            } => Some((*vest_start, *vest_end)),
+        }
+    }
+}
+
 #[blueprint]
 mod incentives_vester {
+    use super::VestingConfiguration;
 
     enable_method_auth! {
         roles {
@@ -100,26 +218,23 @@ mod incentives_vester {
         /// `total_tokens_to_vest` as vesting completes.
         vested_tokens: Decimal,
 
-        /// The instant when vesting begins. This is set when `finish_setup` is
-        /// called and equals the current time plus the pre-claim duration. It
-        /// remains `None` until setup is complete.
-        vest_start: Option<Instant>,
+        /// The vesting configuration containing the start and end times for
+        /// vesting. This is [`VestingConfiguration::Uninitialized`] until
+        /// `finish_setup` is called, at which point it becomes
+        /// [`VestingConfiguration::Initialized`] with the computed vest_start
+        /// and vest_end times.
+        vesting_configuration: VestingConfiguration,
 
-        /// The instant when vesting ends and all tokens are fully vested. This
-        /// is calculated as `vest_start` plus `vest_duration_days` and is set
-        /// when `finish_setup` is called. It remains `None` until setup is complete.
-        vest_end: Option<Instant>,
-
-        /// The duration of the vesting period in days. After this period from
+        /// The duration of the vesting period in seconds. After this period from
         /// `vest_start`, all tokens will be fully vested (100% available). This
         /// is set during instantiation and cannot be changed.
-        vest_duration_days: i64,
+        vest_duration: i64,
 
         /// The duration of the pre-claim period in seconds. This is the time
         /// between when `finish_setup` is called and when vesting actually begins.
         /// During this period, LP tokens can be distributed to users but cannot
         /// be redeemed yet. This is set during instantiation and cannot be changed.
-        pre_claim_duration_seconds: i64,
+        pre_claim_duration: i64,
 
         /// The fraction of tokens that are immediately vested when the vesting
         /// period begins (at `vest_start`). This must be between 0 and 1. For
@@ -141,9 +256,9 @@ mod incentives_vester {
         /// The vesting schedule consists of an initial immediately vested
         /// fraction plus linear vesting of the remainder over the specified
         /// duration. For example, with `initial_vested_fraction = 0.1` and
-        /// `vest_duration_days = 365`, users will have access to 10% of their
-        /// tokens immediately when vesting starts, and the remaining 90% will
-        /// unlock linearly over 365 days.
+        /// `vest_duration = 31536000` (365 days in seconds), users will have
+        /// access to 10% of their tokens immediately when vesting starts, and
+        /// the remaining 90% will unlock linearly over 365 days.
         ///
         /// # Arguments
         ///
@@ -155,18 +270,17 @@ mod incentives_vester {
         ///   the super admin badge resource. Holders of this badge have full
         ///   control over the component, including depositing tokens, finishing
         ///   setup, and withdrawing tokens if needed.
-        /// - `vest_duration_days`: [`i64`] - The duration of the vesting period
-        ///   in days. After this period from `vest_start`, all tokens will be
-        ///   fully vested. Must be positive.
+        /// - `vest_duration`: [`i64`] - The duration of the vesting period
+        ///   in seconds. After this period from `vest_start`, all tokens will
+        ///   be fully vested. Must be positive.
         /// - `initial_vested_fraction`: [`Decimal`] - The fraction of tokens
         ///   that are immediately vested when the vesting period begins. Must
         ///   be between 0 and 1. For example, 0.2 means 20% of tokens are
         ///   immediately accessible.
-        /// - `pre_claim_duration_seconds`: [`i64`] - The duration of the
-        ///   pre-claim period in seconds. This is the time between when
-        ///   `finish_setup` is called and when vesting actually begins. During
-        ///   this period, LP tokens can be distributed but not redeemed. Must
-        ///   be non-negative.
+        /// - `pre_claim_duration`: [`i64`] - The duration of the pre-claim
+        ///   period in seconds. This is the time between when `finish_setup`
+        ///   is called and when vesting actually begins. During this period,
+        ///   LP tokens can be distributed but not redeemed. Must be non-negative.
         /// - `token_to_vest`: [`ResourceAddress`] - The address of the fungible
         ///   token resource that will be vested to users.
         /// - `dapp_def_address`: [`ComponentAddress`] - The dapp definition
@@ -180,28 +294,28 @@ mod incentives_vester {
         /// # Panics
         ///
         /// This function will panic if:
-        /// - `vest_duration_days` is not positive
+        /// - `vest_duration` is not positive
         /// - `initial_vested_fraction` is not between 0 and 1
-        /// - `pre_claim_duration_seconds` is negative
+        /// - `pre_claim_duration` is negative
         pub fn instantiate(
             admin_badge_address: ResourceAddress,
             super_admin_badge_address: ResourceAddress,
-            vest_duration_days: i64,
+            vest_duration: i64,
             initial_vested_fraction: Decimal,
-            pre_claim_duration_seconds: i64,
+            pre_claim_duration: i64,
             token_to_vest: ResourceAddress,
             dapp_def_address: ComponentAddress,
         ) -> Global<IncentivesVester> {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(IncentivesVester::blueprint_id());
 
-            assert!(vest_duration_days > 0, "Vest duration must be positive");
+            assert!(vest_duration > 0, "Vest duration must be positive");
             assert!(
                 initial_vested_fraction >= Decimal::ZERO && initial_vested_fraction <= Decimal::ONE,
                 "initial_vested_fraction must be between 0 and 1"
             );
             assert!(
-                pre_claim_duration_seconds >= 0,
+                pre_claim_duration >= 0,
                 "Pre-claim period must not have negative duration."
             );
 
@@ -251,16 +365,15 @@ mod incentives_vester {
                 vested_tokens: Decimal::ZERO,
                 total_tokens_to_vest: Decimal::ZERO,
 
-                // Vest will only start once all lp tokens have been created. This will them turn into a Some.
-                vest_start: None,
-                vest_end: None,
+                // Vesting configuration starts as uninitialized until finish_setup is called
+                vesting_configuration: VestingConfiguration::new_uninitialized(),
 
                 // Vesting parameters
 
-                // Duration of vest in days
-                vest_duration_days,
+                // Duration of vest in seconds
+                vest_duration,
                 // Pre-claim duration in seconds
-                pre_claim_duration_seconds,
+                pre_claim_duration,
                 // Amount of tokens users can immediately access from the start of the vest.
                 initial_vested_fraction,
             }
@@ -305,7 +418,7 @@ mod incentives_vester {
         /// This method will panic if called after `finish_setup` has been called,
         /// as setup can only occur before the vesting process begins.
         pub fn create_pool_units(&mut self, tokens_to_vest: FungibleBucket) {
-            assert!(self.vest_start.is_none(), "Vesting has already started");
+            self.vesting_configuration.assert_vesting_is_uninitialized();
 
             // Track the actual amount of tokens contributed
             let amount = tokens_to_vest.amount();
@@ -330,30 +443,28 @@ mod incentives_vester {
         /// - No more tokens can be added via `create_pool_units`
         ///
         /// The vesting schedule is configured as follows:
-        /// - `vest_start` = current_time + `pre_claim_duration_seconds`
-        /// - `vest_end` = `vest_start` + `vest_duration_days`
+        /// - `vest_start` = current_time + `pre_claim_duration`
+        /// - `vest_end` = `vest_start` + `vest_duration`
         ///
         /// # Panics
         ///
         /// This method will panic if called more than once, as setup can only
         /// be finalized once.
         pub fn finish_setup(&mut self) {
-            assert!(self.vest_start.is_none(), "Vesting has already started");
+            self.vesting_configuration.assert_vesting_is_uninitialized();
 
             let current_time = Clock::current_time_rounded_to_seconds();
-            let pre_claim_end = current_time
-                .add_seconds(self.pre_claim_duration_seconds)
-                .unwrap();
+            let vest_start = current_time.add_seconds(self.pre_claim_duration).unwrap();
+            let vest_end = vest_start.add_seconds(self.vest_duration).unwrap();
 
-            self.vest_start = Some(pre_claim_end);
-            self.vest_end = Some(pre_claim_end.add_days(self.vest_duration_days).unwrap());
+            self.vesting_configuration =
+                VestingConfiguration::new_initialized(vest_start, vest_end);
 
             let tokens_to_unvest = self.pool.get_vault_amount();
 
-            let unvested_tokens = self.pool.protected_withdraw(
-                tokens_to_unvest,
-                WithdrawStrategy::Rounded(RoundingMode::ToZero),
-            );
+            let unvested_tokens = self
+                .pool
+                .protected_withdraw(tokens_to_unvest, WithdrawStrategy::Exact);
 
             self.locked_tokens_vault.put(unvested_tokens);
         }
@@ -454,7 +565,7 @@ mod incentives_vester {
         /// - Called before `finish_setup` has been called
         /// - `lp_token_amount` is zero or negative
         pub fn claim(&mut self, lp_token_amount: Decimal, account_address: Global<Account>) {
-            assert!(self.vest_start.is_some(), "Vesting not set up yet.");
+            self.vesting_configuration.assert_vesting_is_initialized();
 
             assert!(
                 lp_token_amount > Decimal::ZERO,
@@ -498,22 +609,26 @@ mod incentives_vester {
         /// - Called before `finish_setup` has been called
         /// - Called during the pre-claim period (before `vest_start`)
         pub fn refill(&mut self) {
-            if let Some(vest_start) = self.vest_start {
-                assert!(
-                    Clock::current_time_is_at_or_after(vest_start, TimePrecision::Second),
-                    "Still in pre-claim period. Vesting not started yet."
-                );
-            } else {
+            let VestingConfiguration::Initialized {
+                vest_start,
+                vest_end,
+            } = self.vesting_configuration
+            else {
                 panic!("Vesting setup not complete yet.");
-            }
+            };
+
+            assert!(
+                Clock::current_time_is_at_or_after(vest_start, TimePrecision::Second),
+                "Still in pre-claim period. Vesting not started yet."
+            );
 
             let current_time = Clock::current_time_rounded_to_seconds();
 
-            let vest_duration = self.vest_end.unwrap().seconds_since_unix_epoch
-                - self.vest_start.unwrap().seconds_since_unix_epoch;
+            let vest_duration =
+                vest_end.seconds_since_unix_epoch - vest_start.seconds_since_unix_epoch;
 
-            let elapsed = current_time.seconds_since_unix_epoch
-                - self.vest_start.unwrap().seconds_since_unix_epoch;
+            let elapsed =
+                current_time.seconds_since_unix_epoch - vest_start.seconds_since_unix_epoch;
 
             let raw_progress = Decimal::from(elapsed) / Decimal::from(vest_duration);
 
