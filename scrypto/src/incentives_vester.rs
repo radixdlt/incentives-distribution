@@ -112,6 +112,8 @@ mod incentives_vester {
             put_lp => restrict_to: [super_admin];
             put_locked_tokens => restrict_to: [super_admin];
             remove_locked_tokens => restrict_to: [super_admin];
+            put_pool_tokens => restrict_to: [super_admin];
+            remove_pool_tokens => restrict_to: [super_admin];
         }
     }
 
@@ -460,7 +462,7 @@ mod incentives_vester {
         /// - `tokens`: [`FungibleBucket`] - A bucket containing the LP tokens
         ///   to deposit into the vault.
         pub fn put_lp(&mut self, tokens: FungibleBucket) {
-            self.lp_tokens_vault.put(tokens)
+            self.lp_tokens_vault.put(tokens);
         }
 
         /// Removes all locked (unvested) tokens from the component.
@@ -493,7 +495,40 @@ mod incentives_vester {
         /// - `tokens`: [`FungibleBucket`] - A bucket containing the tokens to
         ///   deposit into the locked vault.
         pub fn put_locked_tokens(&mut self, tokens: FungibleBucket) {
-            self.locked_tokens_vault.put(tokens)
+            self.locked_tokens_vault.put(tokens);
+        }
+
+        /// Withdraws tokens from the pool.
+        ///
+        /// This method withdraws tokens from the pool, decreasing
+        /// the value of a pool unit.
+        ///
+        /// Use with caution, as it will decrease the value of user's pool tokens,
+        /// especially since they can redeem them before you use `put_pool_tokens` again,
+        /// leaving the user at a loss.
+        ///
+        /// # Arguments
+        ///
+        /// - `amount`: [`Decimal`] - Amount of tokens to withdraw
+        pub fn remove_pool_tokens(&mut self, amount: Decimal) -> FungibleBucket {
+            self.pool
+                .protected_withdraw(amount, WithdrawStrategy::Exact)
+        }
+
+        /// Deposits tokens (back) into the pool.
+        ///
+        /// This method puts tokens in the pool, increasing
+        /// the value of a pool unit.
+        ///
+        /// This is typically used in conjunction with `remove_pool_tokens` to
+        /// temporarily withdraw and then return tokens.
+        ///
+        /// # Arguments
+        ///
+        /// - `tokens`: [`FungibleBucket`] - A bucket containing the tokens to
+        ///   deposit into the pool.
+        pub fn put_pool_tokens(&mut self, tokens: FungibleBucket) {
+            self.pool.protected_deposit(tokens);
         }
 
         // endregion:Super Admin Methods
@@ -535,9 +570,6 @@ mod incentives_vester {
 
             let lp_tokens = self.lp_tokens_vault.take(lp_token_amount);
             self.locker.store(account_address, lp_tokens.into(), true);
-
-            // Potentially, we can mint an NFT here to represent the user's performance in Season 1
-            // We would also deposit it with the account_locker
         }
 
         // endregion:Admin Methods
