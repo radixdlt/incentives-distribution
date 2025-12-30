@@ -252,8 +252,6 @@ mod incentives_vester {
         ///   AccountLocker component to use. If `None`, a new AccountLocker will
         ///   be created via cross-blueprint call with the super_admin badge as
         ///   owner. If `Some`, the provided AccountLocker will be used.
-        /// - `dapp_def_address`: [`ComponentAddress`] - The dapp definition
-        ///   address for metadata purposes.
         ///
         /// # Returns
         ///
@@ -274,7 +272,6 @@ mod incentives_vester {
             pre_claim_duration: i64,
             token_to_vest: ResourceAddress,
             locker: Option<Global<AccountLocker>>,
-            dapp_def_address: ComponentAddress,
         ) -> Global<IncentivesVester> {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(IncentivesVester::blueprint_id());
@@ -321,10 +318,6 @@ mod incentives_vester {
             let pool_unit_resource_address =
                 ResourceAddress::try_from(pool_unit_global_address).unwrap();
 
-            // We can set the metadata of the pool unit here immediately.
-            // But we would need to pass the super_admin_badge at instantiation to allow that.
-            // Let's not for now.
-
             Self {
                 locker,
                 pool,
@@ -358,12 +351,6 @@ mod incentives_vester {
                 admin => admin_access_rule;
             })
             .with_address(address_reservation)
-            .metadata(metadata! {
-                init {
-                    "name" => "Incentives Vester".to_string(), updatable;
-                    "dapp_definition" => dapp_def_address, updatable;
-                }
-            })
             .globalize()
         }
 

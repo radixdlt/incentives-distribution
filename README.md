@@ -26,7 +26,7 @@ The component uses two types of badges:
 
 ## Setup sequence
 
-### 1. Instantiate the component
+### 1a. Instantiate the component & Account Locker
 Create the vester with basic parameters. No tokens required yet.
 
 Parameters:
@@ -36,7 +36,7 @@ Parameters:
 - `initial_vested_fraction` - Fraction immediately accessible (e.g., `Decimal("0.2")` for 20%)
 - `pre_claim_duration` - Pre-claim period in seconds (e.g., `86400i64` for 1 day)
 - `token_to_vest` - Resource address of token to vest (e.g., XRD)
-- `dapp_definition_address` - Dapp definition address (you don't need to care about this when testing)
+- `locker` - Account Locker address to use
 
 Instantiation manifest:
 ```
@@ -50,7 +50,7 @@ CALL_FUNCTION
   Decimal("0.2") # initial vested fraction (20%)
   86400i64 # pre-claim period in seconds (1 day)
   Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD
-  Address("{dapp_definition_address}") # No need to care about this when testing
+  Enum<0u8>( ) # no existing locker
 ;
 
 CALL_METHOD
@@ -59,6 +59,31 @@ CALL_METHOD
   Expression("ENTIRE_WORKTOP")
 ;
 ```
+
+### 1b. Instantiate the component with existing Account Locker
+If you want to use an existing Account Locker, that's possible. You'll have to specify a locker:
+```
+CALL_FUNCTION
+  Address("package_tdx_2_1pk03fls3pdjf5dewt0kewhpx9syyj5vd4wq808sffcq5ghjk7svd4y")
+  "IncentivesVester"
+  "instantiate"
+  Address("{admin_badge_address}") # admin badge for backend, create yourself in advance
+  Address("{super_admin_badge_address}") # super admin badge, create yourself in advance
+  2592000i64 # vest duration in seconds (30 days)
+  Decimal("0.2") # initial vested fraction (20%)
+  86400i64 # pre-claim period in seconds (1 day)
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD
+  Enum<1u8>( Address({account_locker_address}) )
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "deposit_batch"
+  Expression("ENTIRE_WORKTOP")
+;
+```
+
+**IMPORTANT**: When using an existing locker, make sure to add the global caller virtual badge of the vester component to the access rules of the account locker. This is easy via the `add_storer_rule` method on the AccountLockerWrapper component. Do this after instantiating the IncentivesVester.
 
 ### 2. Fill the pool with tokens
 Add tokens to create LP tokens. Can be done multiple times before finishing setup.
@@ -253,8 +278,45 @@ CALL_METHOD
 ;
 ```
 
-## Metadata
-The pool units (lp tokens) don't have any metadata (so no name, symbol and icon) on instantiation. We need to use the super admin badge to set this (same for the component and locker, and their metadata). This is fine for testing purposes, in my opinion. So I suggest to not care about that for now.
+## Metadata & dApp Definition
+No metadata is set automatically. So we'll need to do that (tip, use [the console](https://console.radixdlt.com/configure-metadata)).
+
+If you're starting from scratch, a dApp Definition needs to be created (preferably using the [wallet compatible derivation](https://github.com/radixdlt/wallet-compatible-derivation)). For incentives, it makes sense to use the existing dApp Definition.
+
+After the vesting component is instantiated, metadata needs to be set on:
+
+### dApp Definition
+|field| type | description |
+|--|--|--|
+| `account_locker` | `GlobalAddress` | `GlobalAddress` of the `AccountLocker` used by incentives dApp |
+| `claimed_entities` | `Vec<GlobalAddress>` | `GlobalAddress`es of the `AccountLocker`, `IncentivesVester` and `ResourceAddress` of vesting component's LP |
+
+
+### Pool Units
+|field| type | description |
+|--|--|--|
+| `name` | `string` | name of reward (pool unit) fungible |
+| `symbol` | `string` | symbol of reward (pool unit) fungible |
+| `description` | `string` | description of reward (pool unit) fungible |
+| `icon_url` | `URL` | link to icon of reward (pool unit) fungible |
+| `info_url` | `URL` | link to info about reward (pool unit) fungible |
+| `dapp_definitions` | `Vec<Address>` | dapp definition address of incentives |
+
+### The Vesting Component
+|field| type | description |
+|--|--|--|
+| `name` | `string` | name of component |
+| `symbol` | `string` | symbol of component  |
+| `dapp_definition` | `Address` | dapp definition address of incentives |
+
+### The Account Locker
+You can skip this if you instantiated without creating a new locker. Make sure to add the storer rule to the already existing locker though (see 1b of setup)!
+
+|field| type | description |
+|--|--|--|
+| `name` | `string` | name of locker|
+| `symbol` | `string` | symbol of locker|
+| `dapp_definition` | `Address` | dapp definition address of incentives |
 
 ## Other methods
 
