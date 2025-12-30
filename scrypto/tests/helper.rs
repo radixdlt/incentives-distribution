@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use incentives_vester::incentives_vester_test::*;
+use incentives_vester::incentives_vester::incentives_vester_test::*;
 use dummy_account::incentives_vester_test::*;
 use scrypto_test::prelude::*;
 
@@ -80,6 +80,7 @@ impl Helper {
         let dapp_def_address = ComponentAddress::try_from(dapp_def_account.0.clone()).unwrap();
 
         // Instantiate the IncentivesVester component using the test stub
+        // Pass None for locker to create a new one via cross-blueprint call
         let vester = IncentivesVester::instantiate(
             admin_badge_address,
             super_admin_badge_address,
@@ -87,6 +88,7 @@ impl Helper {
             initial_vested_fraction,
             pre_claim_duration,
             token_address,
+            None,
             dapp_def_address,
             package_address,
             &mut env,
