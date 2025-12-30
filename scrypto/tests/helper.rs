@@ -21,15 +21,19 @@ pub struct Helper {
     pub lp_resource_address: ResourceAddress,
 }
 
+/// Number of seconds in a day (24 * 60 * 60)
+pub const SECONDS_PER_DAY: i64 = 86400;
+
 impl Helper {
     pub fn new() -> Result<Self, RuntimeError> {
-        Self::new_with_config(365, dec!("0.1"), 604800)
+        // 365 days in seconds, 10% initial vest, 7 days pre-claim in seconds
+        Self::new_with_config(365 * SECONDS_PER_DAY, dec!("0.1"), 7 * SECONDS_PER_DAY)
     }
 
     pub fn new_with_config(
-        vest_duration_days: i64,
+        vest_duration: i64,
         initial_vested_fraction: Decimal,
-        pre_claim_duration_seconds: i64,
+        pre_claim_duration: i64,
     ) -> Result<Self, RuntimeError> {
         let mut env = TestEnvironmentBuilder::new().build();
 
@@ -79,9 +83,9 @@ impl Helper {
         let vester = IncentivesVester::instantiate(
             admin_badge_address,
             super_admin_badge_address,
-            vest_duration_days,
+            vest_duration,
             initial_vested_fraction,
-            pre_claim_duration_seconds,
+            pre_claim_duration,
             token_address,
             dapp_def_address,
             package_address,

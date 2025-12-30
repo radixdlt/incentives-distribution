@@ -57,7 +57,7 @@ fn test_finish_setup() -> Result<(), RuntimeError> {
 }
 
 #[test]
-#[should_panic(expected = "Vesting has already started")]
+#[should_panic(expected = "Vesting has already been initialized")]
 fn test_create_pool_units_after_finish_setup_fails() {
     let mut helper = Helper::new().unwrap();
 
@@ -69,7 +69,7 @@ fn test_create_pool_units_after_finish_setup_fails() {
 }
 
 #[test]
-#[should_panic(expected = "Vesting has already started")]
+#[should_panic(expected = "Vesting has already been initialized")]
 fn test_finish_setup_twice_fails() {
     let mut helper = Helper::new().unwrap();
 
