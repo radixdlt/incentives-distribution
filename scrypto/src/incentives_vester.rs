@@ -722,7 +722,10 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`Decimal`] - The amount of tokens in the pool vault.
-        pub fn get_pool_vault_amount(&mut self) -> Decimal {
+        pub fn get_pool_vault_amount(&mut self, refill: bool) -> Decimal {
+            if refill {
+                self.refill();
+            }
             self.pool.get_vault_amount()
         }
 
@@ -735,7 +738,10 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`Decimal`] - The amount of locked tokens.
-        pub fn get_locked_vault_amount(&mut self) -> Decimal {
+        pub fn get_locked_vault_amount(&mut self, refill: bool) -> Decimal {
+            if refill {
+                self.refill();
+            }
             self.locked_tokens_vault.amount()
         }
 
@@ -773,7 +779,10 @@ mod incentives_vester {
         ///
         /// - [`Decimal`] - The amount of tokens that would be received for
         ///   redeeming the specified amount of LP tokens.
-        pub fn get_pool_redemption_value(&self, lp_amount: Decimal) -> Decimal {
+        pub fn get_pool_redemption_value(&mut self, lp_amount: Decimal, refill: bool) -> Decimal {
+            if refill {
+                self.refill();
+            }
             self.pool.get_redemption_value(lp_amount)
         }
 
@@ -787,7 +796,10 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`Decimal`] - The amount of tokens that have been vested.
-        pub fn get_vested_tokens(&self) -> Decimal {
+        pub fn get_vested_tokens(&mut self, refill: bool) -> Decimal {
+            if refill {
+                self.refill();
+            }
             self.vested_tokens
         }
 
@@ -801,7 +813,10 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`Decimal`] - The total amount of tokens to vest.
-        pub fn get_total_tokens_to_vest(&self) -> Decimal {
+        pub fn get_total_tokens_to_vest(&mut self, refill: bool) -> Decimal {
+            if refill {
+                self.refill();
+            }
             self.total_tokens_to_vest
         }
 
