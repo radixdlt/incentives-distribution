@@ -246,7 +246,7 @@ CALL_METHOD
 ;
 ```
 
-### Withdraw from Pool
+### Remove tokens from Pool
 To withdraw tokens from the pool itself, use the native `OneResourcePool` method `protected_withdraw`. This requires the super admin badge.
 
 Manifest:
@@ -260,21 +260,107 @@ CALL_METHOD
 
 CALL_METHOD
   Address("{incentives_vester_component_address}")
-  "get_pool_vault_amount"
-;
-
-# Use the amount from the previous call
-CALL_METHOD
-  Address("{pool_address}")
-  "protected_withdraw"
+  "remove_pool_tokens"
   Decimal("{amount_to_withdraw}")
-  Enum<WithdrawStrategy::Rounded>(Enum<RoundingMode::ToZero>())
 ;
 
 CALL_METHOD
   Address("{your_account_address}")
   "deposit_batch"
   Expression("ENTIRE_WORKTOP")
+;
+```
+
+### Put LP Tokens Back
+Returns LP tokens to the component's internal vault (super admin only).
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "withdraw"
+  Address("{lp_token_address}")
+  Decimal("{amount}")
+;
+
+TAKE_ALL_FROM_WORKTOP
+  Address("{lp_token_address}")
+  Bucket("lp_tokens")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "put_lp"
+  Bucket("lp_tokens")
+;
+```
+
+### Put Locked Tokens Back
+Returns locked tokens to the component's vault.
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "withdraw"
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD or your token
+  Decimal("{amount}")
+;
+
+TAKE_ALL_FROM_WORKTOP
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc")
+  Bucket("tokens")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "put_locked_tokens"
+  Bucket("tokens")
+;
+```
+
+### Put Pool Tokens Back
+Returns tokens to the pool.
+
+Manifest:
+```
+CALL_METHOD
+  Address("{account_that_holds_super_admin_badge}")
+  "create_proof_of_amount"
+  Address("{super_admin_badge_address}")
+  Decimal("1")
+;
+
+CALL_METHOD
+  Address("{your_account_address}")
+  "withdraw"
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD or your token
+  Decimal("{amount}")
+;
+
+TAKE_ALL_FROM_WORKTOP
+  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc")
+  Bucket("tokens")
+;
+
+CALL_METHOD
+  Address("{incentives_vester_component_address}")
+  "put_pool_tokens"
+  Bucket("tokens")
 ;
 ```
 
@@ -317,70 +403,6 @@ You can skip this if you instantiated without creating a new locker. Make sure t
 | `name` | `string` | name of locker|
 | `symbol` | `string` | symbol of locker|
 | `dapp_definition` | `Address` | dapp definition address of incentives |
-
-## Other methods
-
-### Put LP Tokens Back
-Returns LP tokens to the component's internal vault (super admin only).
-
-Manifest:
-```
-CALL_METHOD
-  Address("{account_that_holds_super_admin_badge}")
-  "create_proof_of_amount"
-  Address("{super_admin_badge_address}")
-  Decimal("1")
-;
-
-CALL_METHOD
-  Address("{your_account_address}")
-  "withdraw"
-  Address("{lp_token_address}")
-  Decimal("{amount}")
-;
-
-TAKE_ALL_FROM_WORKTOP
-  Address("{lp_token_address}")
-  Bucket("lp_tokens")
-;
-
-CALL_METHOD
-  Address("{incentives_vester_component_address}")
-  "put_lp"
-  Bucket("lp_tokens")
-;
-```
-
-### Put Locked Tokens Back
-Returns locked tokens to the component's vault (super admin only).
-
-Manifest:
-```
-CALL_METHOD
-  Address("{account_that_holds_super_admin_badge}")
-  "create_proof_of_amount"
-  Address("{super_admin_badge_address}")
-  Decimal("1")
-;
-
-CALL_METHOD
-  Address("{your_account_address}")
-  "withdraw"
-  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD or your token
-  Decimal("{amount}")
-;
-
-TAKE_ALL_FROM_WORKTOP
-  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc")
-  Bucket("tokens")
-;
-
-CALL_METHOD
-  Address("{incentives_vester_component_address}")
-  "put_locked_tokens"
-  Bucket("tokens")
-;
-```
 
 ### Query Methods (Public)
 These methods can be called by anyone to get information about the vesting state:
