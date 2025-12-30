@@ -1,90 +1,11 @@
 use scrypto::prelude::*;
 
 use crate::account_locker::account_locker_blueprint::*;
-
-/// An enum storing the vesting configuration.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, ScryptoSbor, ManifestSbor)]
-pub enum VestingConfiguration {
-    /// Vesting has not yet been initialized and there isn't yet a known vesting
-    /// start or end [`Instant`] known. Vesting status remains [`Uninitialized`]
-    /// until the `finish_setup` method is called on the vesting component.
-    Uninitialized,
-
-    /// An initialized vesting configuration containing the time at which
-    /// vesting begins, the time at which vesting ends, and other information
-    /// useful for vesting.
-    Initialized {
-        /// The instant when vesting begins. This is set when `finish_setup` is
-        /// called and equals the current time plus the pre-claim duration.
-        vest_start: Instant,
-
-        /// The instant when vesting ends and all tokens are fully vested. This
-        /// is calculated as `vest_start` plus `vest_duration_seconds_seconds` and is set
-        /// when `finish_setup` is called. This is strictly greater than or
-        /// equal to `vest_start` and can never be smaller.
-        vest_end: Instant,
-    },
-}
-
-impl VestingConfiguration {
-    /// Creates a new uninitialized vesting configuration.
-    ///
-    /// This is the initial state before `finish_setup` is called on the
-    /// vesting component.
-    pub const fn new_uninitialized() -> Self {
-        Self::Uninitialized
-    }
-
-    /// Creates a new initialized vesting configuration with the given start
-    /// and end times.
-    ///
-    /// # Arguments
-    ///
-    /// - `vest_start`: The instant when vesting begins.
-    /// - `vest_end`: The instant when vesting ends.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `vest_end < vest_start`.
-    pub fn new_initialized(vest_start: Instant, vest_end: Instant) -> Self {
-        assert!(
-            vest_end.seconds_since_unix_epoch >= vest_start.seconds_since_unix_epoch,
-            "vest_end must be >= vest_start"
-        );
-        Self::Initialized {
-            vest_start,
-            vest_end,
-        }
-    }
-
-    /// Asserts that vesting is uninitialized.
-    ///
-    /// # Panics
-    ///
-    /// Panics if vesting has already been initialized.
-    pub fn assert_vesting_is_uninitialized(&self) {
-        assert!(
-            matches!(self, Self::Uninitialized),
-            "Vesting has already been initialized"
-        );
-    }
-
-    /// Asserts that vesting is initialized.
-    ///
-    /// # Panics
-    ///
-    /// Panics if vesting has not been initialized yet.
-    pub fn assert_vesting_is_initialized(&self) {
-        assert!(
-            matches!(self, Self::Initialized { .. }),
-            "Vesting has not been initialized yet"
-        );
-    }
-}
+use crate::vesting_state::{ResolvedVestingState, VestingConfiguration, VestingState};
 
 #[blueprint]
 mod incentives_vester {
-    use super::VestingConfiguration;
+    use super::*;
 
     enable_method_auth! {
         roles {
@@ -152,63 +73,9 @@ mod incentives_vester {
     /// value for remaining LP token holders, creating an incentive to hold until
     /// full vesting.
     struct IncentivesVester {
-        /// The account locker component used to deliver LP tokens to user accounts
-        /// during the claim process. This circumvents accounts that have deposit
-        /// rules configured - if an account doesn't allow direct deposits, the
-        /// locker stores the tokens like a mailbox that users can claim from.
-        locker: Global<AccountLocker>,
-
-        /// The one-resource pool that manages the vesting tokens and LP tokens.
-        /// This pool allows users to redeem their LP tokens for the underlying
-        /// vested tokens based on the current vesting progress.
-        pool: Global<OneResourcePool>,
-
-        /// A vault holding LP tokens that have not yet been claimed by users.
-        /// These tokens are created during setup and distributed to users via
-        /// the `claim` method during the pre-claim period.
-        lp_tokens_vault: FungibleVault,
-
-        /// A vault holding tokens that are still locked and have not yet vested
-        /// into the pool. During the vesting period, tokens are gradually moved
-        /// from this vault into the pool via the `refill` method based on the
-        /// vesting schedule.
-        locked_tokens_vault: FungibleVault,
-
-        /// The total amount of tokens that will be vested over the entire vesting
-        /// period. This is set during the setup phase when tokens are deposited
-        /// via `create_pool_units` and remains constant throughout vesting.
-        total_tokens_to_vest: Decimal,
-
-        /// The cumulative amount of tokens that have been vested so far, meaning
-        /// they have been moved from the locked vault into the pool. This value
-        /// increases over time as `refill` is called and approaches
-        /// `total_tokens_to_vest` as vesting completes.
-        vested_tokens: Decimal,
-
-        /// The vesting configuration containing the start and end times for
-        /// vesting. This is [`VestingConfiguration::Uninitialized`] until
-        /// `finish_setup` is called, at which point it becomes
-        /// [`VestingConfiguration::Initialized`] with the computed vest_start
-        /// and vest_end times.
-        vesting_configuration: VestingConfiguration,
-
-        /// The duration of the vesting period in seconds. After this period from
-        /// `vest_start`, all tokens will be fully vested (100% available). This
-        /// is set during instantiation and cannot be changed.
-        vest_duration_seconds: i64,
-
-        /// The duration of the pre-claim period in seconds. This is the time
-        /// between when `finish_setup` is called and when vesting actually begins.
-        /// During this period, LP tokens can be distributed to users but cannot
-        /// be redeemed yet. This is set during instantiation and cannot be changed.
-        pre_claim_duration_seconds: i64,
-
-        /// The fraction of tokens that are immediately vested when the vesting
-        /// period begins (at `vest_start`). This must be between 0 and 1. For
-        /// example, 0.1 means 10% of tokens are immediately accessible when
-        /// vesting starts. The remaining tokens vest linearly over the vesting
-        /// duration. This is set during instantiation and cannot be changed.
-        initial_vested_fraction: Decimal,
+        /// The vesting state. Accessing this through `get_state()` or `get_state_mut()`
+        /// automatically calls `refill()` to ensure values are never stale.
+        state: VestingState,
     }
 
     impl IncentivesVester {
@@ -278,16 +145,6 @@ mod incentives_vester {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(IncentivesVester::blueprint_id());
 
-            assert!(vest_duration_seconds > 0, "Vest duration must be positive");
-            assert!(
-                initial_vested_fraction >= Decimal::ZERO && initial_vested_fraction <= Decimal::ONE,
-                "initial_vested_fraction must be between 0 and 1"
-            );
-            assert!(
-                pre_claim_duration_seconds >= 0,
-                "Pre-claim period must not have negative duration."
-            );
-
             let admin_access_rule = rule!(require(admin_badge_address));
 
             let super_admin_access_rule = rule!(
@@ -299,9 +156,6 @@ mod incentives_vester {
             let locker = match locker {
                 Some(existing_locker) => existing_locker,
                 None => {
-                    // Create a new AccountLocker via cross-blueprint call
-                    // The instantiate method returns both the wrapper and the locker
-                    // Pass the super_admin_access_rule so both the vester and wrapper can access it
                     let (_locker_wrapper, locker) =
                         AccountLockerWrapper::instantiate(super_admin_access_rule.clone());
                     locker
@@ -321,30 +175,19 @@ mod incentives_vester {
                 ResourceAddress::try_from(pool_unit_global_address).unwrap();
 
             Self {
-                locker,
-                pool,
-
-                // Vault that will hold the pool units the users can claim
-                lp_tokens_vault: FungibleVault::new(pool_unit_resource_address),
-
-                // Vault that will be filled with tokens to vest (that are still unvested)
-                locked_tokens_vault: FungibleVault::new(token_to_vest),
-
-                // Already vested amount = initial immediate vest
-                vested_tokens: Decimal::ZERO,
-                total_tokens_to_vest: Decimal::ZERO,
-
-                // Vesting configuration starts as uninitialized until finish_setup is called
-                vesting_configuration: VestingConfiguration::new_uninitialized(),
-
-                // Vesting parameters
-
-                // Duration of vest in seconds
-                vest_duration_seconds,
-                // Pre-claim duration in seconds
-                pre_claim_duration_seconds,
-                // Amount of tokens users can immediately access from the start of the vest.
-                initial_vested_fraction,
+                state: VestingState::new(ResolvedVestingState {
+                    vesting_configuration: VestingConfiguration::new_uninitialized(
+                        vest_duration_seconds,
+                        pre_claim_duration_seconds,
+                        initial_vested_fraction,
+                    ),
+                    total_tokens_to_vest: Decimal::ZERO,
+                    vested_tokens: Decimal::ZERO,
+                    locked_tokens_vault: FungibleVault::new(token_to_vest),
+                    pool,
+                    locker,
+                    lp_tokens_vault: FungibleVault::new(pool_unit_resource_address),
+                }),
             }
             .instantiate()
             .prepare_to_globalize(super_admin_owner_role)
@@ -381,14 +224,14 @@ mod incentives_vester {
         /// This method will panic if called after `finish_setup` has been called,
         /// as setup can only occur before the vesting process begins.
         pub fn create_pool_units(&mut self, tokens_to_vest: FungibleBucket) {
-            self.vesting_configuration.assert_vesting_is_uninitialized();
+            let state = self.state.get_state_mut();
+            state.vesting_configuration.assert_vesting_is_uninitialized();
 
-            // Track the actual amount of tokens contributed
             let amount = tokens_to_vest.amount();
-            self.total_tokens_to_vest += amount;
+            state.total_tokens_to_vest += amount;
 
-            let lp_tokens = self.pool.contribute(tokens_to_vest);
-            self.lp_tokens_vault.put(lp_tokens);
+            let lp_tokens = state.pool.contribute(tokens_to_vest);
+            state.lp_tokens_vault.put(lp_tokens);
         }
 
         /// Finalizes the setup phase and begins the pre-claim period.
@@ -414,24 +257,31 @@ mod incentives_vester {
         /// This method will panic if called more than once, as setup can only
         /// be finalized once.
         pub fn finish_setup(&mut self) {
-            self.vesting_configuration.assert_vesting_is_uninitialized();
+            let state = self.state.get_state_mut();
+
+            let VestingConfiguration::Uninitialized {
+                vest_duration_seconds,
+                pre_claim_duration_seconds,
+                initial_vested_fraction,
+            } = state.vesting_configuration
+            else {
+                panic!("Vesting has already been initialized");
+            };
 
             let current_time = Clock::current_time_rounded_to_seconds();
             let vest_start = current_time
-                .add_seconds(self.pre_claim_duration_seconds)
+                .add_seconds(pre_claim_duration_seconds)
                 .unwrap();
-            let vest_end = vest_start.add_seconds(self.vest_duration_seconds).unwrap();
+            let vest_end = vest_start.add_seconds(vest_duration_seconds).unwrap();
 
-            self.vesting_configuration =
-                VestingConfiguration::new_initialized(vest_start, vest_end);
+            state.vesting_configuration =
+                VestingConfiguration::new_initialized(vest_start, vest_end, initial_vested_fraction);
 
-            let tokens_to_unvest = self.pool.get_vault_amount();
-
-            let unvested_tokens = self
+            let tokens_to_unvest = state.pool.get_vault_amount();
+            let unvested_tokens = state
                 .pool
                 .protected_withdraw(tokens_to_unvest, WithdrawStrategy::Exact);
-
-            self.locked_tokens_vault.put(unvested_tokens);
+            state.locked_tokens_vault.put(unvested_tokens);
         }
 
         /// Removes all LP tokens from the component's internal vault.
@@ -448,7 +298,7 @@ mod incentives_vester {
         ///
         /// - [`FungibleBucket`] - A bucket containing all LP tokens from the vault.
         pub fn remove_lp(&mut self) -> FungibleBucket {
-            self.lp_tokens_vault.take_all()
+            self.state.get_state_mut().lp_tokens_vault.take_all()
         }
 
         /// Deposits LP tokens back into the component's internal vault.
@@ -464,7 +314,7 @@ mod incentives_vester {
         /// - `tokens`: [`FungibleBucket`] - A bucket containing the LP tokens
         ///   to deposit into the vault.
         pub fn put_lp(&mut self, tokens: FungibleBucket) {
-            self.lp_tokens_vault.put(tokens);
+            self.state.get_state_mut().lp_tokens_vault.put(tokens);
         }
 
         /// Removes all locked (unvested) tokens from the component.
@@ -481,7 +331,7 @@ mod incentives_vester {
         ///
         /// - [`FungibleBucket`] - A bucket containing all locked tokens.
         pub fn remove_locked_tokens(&mut self) -> FungibleBucket {
-            self.locked_tokens_vault.take_all()
+            self.state.get_state_mut().locked_tokens_vault.take_all()
         }
 
         /// Deposits locked tokens back into the component's vault.
@@ -497,7 +347,7 @@ mod incentives_vester {
         /// - `tokens`: [`FungibleBucket`] - A bucket containing the tokens to
         ///   deposit into the locked vault.
         pub fn put_locked_tokens(&mut self, tokens: FungibleBucket) {
-            self.locked_tokens_vault.put(tokens);
+            self.state.get_state_mut().locked_tokens_vault.put(tokens);
         }
 
         /// Withdraws tokens from the pool.
@@ -513,7 +363,9 @@ mod incentives_vester {
         ///
         /// - `amount`: [`Decimal`] - Amount of tokens to withdraw
         pub fn remove_pool_tokens(&mut self, amount: Decimal) -> FungibleBucket {
-            self.pool
+            self.state
+                .get_state_mut()
+                .pool
                 .protected_withdraw(amount, WithdrawStrategy::Exact)
         }
 
@@ -530,7 +382,7 @@ mod incentives_vester {
         /// - `tokens`: [`FungibleBucket`] - A bucket containing the tokens to
         ///   deposit into the pool.
         pub fn put_pool_tokens(&mut self, tokens: FungibleBucket) {
-            self.pool.protected_deposit(tokens);
+            self.state.get_state_mut().pool.protected_deposit(tokens);
         }
 
         // endregion:Super Admin Methods
@@ -563,15 +415,15 @@ mod incentives_vester {
         /// - Called before `finish_setup` has been called
         /// - `lp_token_amount` is zero or negative
         pub fn claim(&mut self, lp_token_amount: Decimal, account_address: Global<Account>) {
-            self.vesting_configuration.assert_vesting_is_initialized();
-
+            let state = self.state.get_state_mut();
+            state.vesting_configuration.assert_vesting_is_initialized();
             assert!(
                 lp_token_amount > Decimal::ZERO,
                 "LP token amount must be greater than zero"
             );
 
-            let lp_tokens = self.lp_tokens_vault.take(lp_token_amount);
-            self.locker.store(account_address, lp_tokens.into(), true);
+            let lp_tokens = state.lp_tokens_vault.take(lp_token_amount);
+            state.locker.store(account_address, lp_tokens.into(), true);
         }
 
         // endregion:Admin Methods
@@ -595,66 +447,14 @@ mod incentives_vester {
         ///
         /// This method is idempotent - calling it multiple times at the same
         /// point in time will not move additional tokens. It automatically gets
-        /// called during `redeem`, but can also be called manually to update
+        /// called by getter methods, but can also be called manually to update
         /// the pool and show accurate LP token values in wallets.
         ///
-        /// # Panics
-        ///
-        /// This method will panic if:
-        /// - Called before `finish_setup` has been called
-        /// - Called during the pre-claim period (before `vest_start`)
+        /// If called before `finish_setup` or during the pre-claim period,
+        /// this method returns early without doing anything.
         pub fn refill(&mut self) {
-            let VestingConfiguration::Initialized {
-                vest_start,
-                vest_end,
-            } = self.vesting_configuration
-            else {
-                panic!("Vesting setup not complete yet.");
-            };
-
-            assert!(
-                Clock::current_time_is_at_or_after(vest_start, TimePrecision::Second),
-                "Still in pre-claim period. Vesting not started yet."
-            );
-
-            let current_time = Clock::current_time_rounded_to_seconds();
-
-            let vest_duration_seconds =
-                vest_end.seconds_since_unix_epoch - vest_start.seconds_since_unix_epoch;
-
-            let elapsed =
-                current_time.seconds_since_unix_epoch - vest_start.seconds_since_unix_epoch;
-
-            let raw_progress = Decimal::from(elapsed) / Decimal::from(vest_duration_seconds);
-
-            let vest_progress = if raw_progress <= Decimal::ZERO {
-                Decimal::ZERO
-            } else if raw_progress >= Decimal::ONE {
-                Decimal::ONE
-            } else {
-                raw_progress
-            };
-
-            // Apply initial vested fraction + linear vesting of the remainder
-            // At vest_start (progress = 0): initial_vested_fraction is available
-            // At vest_end (progress = 1): 100% is available
-            // Formula: initial + (1 - initial) * progress
-            let vested_fraction = self.initial_vested_fraction
-                + (Decimal::ONE - self.initial_vested_fraction) * vest_progress;
-
-            // Target total vested amount at this point in time
-            let vested_tokens_target = self.total_tokens_to_vest * vested_fraction;
-
-            let tokens_to_vest_now = vested_tokens_target - self.vested_tokens;
-
-            if tokens_to_vest_now <= Decimal::ZERO {
-                return;
-            }
-
-            let tokens = self.locked_tokens_vault.take(tokens_to_vest_now);
-            self.pool.protected_deposit(tokens);
-
-            self.vested_tokens = vested_tokens_target;
+            // get_state_mut() automatically calls refill internally
+            let _ = self.state.get_state_mut();
         }
 
         /// Redeems LP tokens for the vested portion of the underlying tokens.
@@ -692,8 +492,7 @@ mod incentives_vester {
                 lp_token_bucket.amount() > Decimal::ZERO,
                 "LP bucket must contain some amount"
             );
-            self.refill();
-            self.pool.redeem(lp_token_bucket)
+            self.state.get_state_mut().pool.redeem(lp_token_bucket)
         }
 
         /// Returns the amount of LP tokens in the component's internal vault.
@@ -706,7 +505,7 @@ mod incentives_vester {
         ///
         /// - [`Decimal`] - The amount of unclaimed LP tokens in the vault.
         pub fn get_lp_token_amount(&mut self) -> Decimal {
-            self.lp_tokens_vault.amount()
+            self.state.get_state().lp_tokens_vault.amount()
         }
 
         /// Returns the projected value of 1 LP token at full maturity.
@@ -722,26 +521,28 @@ mod incentives_vester {
         /// The calculation is:
         /// `maturity_value = (pool_tokens + locked_tokens) / pool_tokens * current_redemption_value`
         ///
-        /// This method calls `refill` first to ensure the pool is up-to-date.
-        ///
         /// # Returns
         ///
         /// - [`Decimal`] - The projected value of 1 LP token at full maturity.
         ///
         /// # Panics
         ///
-        /// This method will panic if the current redemption value is 0, which
-        /// should only occur if the pool is empty.
+        /// This method will panic if called before vesting has started (i.e.,
+        /// before `finish_setup` is called or during the pre-claim period),
+        /// as the pool will be empty and the maturity value cannot be calculated.
         pub fn get_maturity_value(&mut self) -> Decimal {
-            self.refill();
+            let state = self.state.get_state();
 
-            let current_redemption_value = self.pool.get_redemption_value(Decimal::ONE);
+            let current_unlocked_amount = state.pool.get_vault_amount();
+            assert!(
+                current_unlocked_amount > Decimal::ZERO,
+                "Cannot calculate maturity value before vesting starts"
+            );
 
-            let current_unlocked_amount = self.pool.get_vault_amount();
-            let still_locked_amount = self.locked_tokens_vault.amount();
+            let current_redemption_value = state.pool.get_redemption_value(Decimal::ONE);
+            let still_locked_amount = state.locked_tokens_vault.amount();
 
             let final_token_amount = current_unlocked_amount + still_locked_amount;
-
             let maturity_factor = final_token_amount / current_unlocked_amount;
 
             maturity_factor * current_redemption_value
@@ -751,32 +552,26 @@ mod incentives_vester {
         ///
         /// This method returns the amount of vested tokens that are currently
         /// available for redemption in the pool. This amount increases over time
-        /// as tokens are vested via the `refill` method.
+        /// as tokens vest.
         ///
         /// # Returns
         ///
         /// - [`Decimal`] - The amount of tokens in the pool vault.
-        pub fn get_pool_vault_amount(&mut self, refill: bool) -> Decimal {
-            if refill {
-                self.refill();
-            }
-            self.pool.get_vault_amount()
+        pub fn get_pool_vault_amount(&mut self) -> Decimal {
+            self.state.get_state().pool.get_vault_amount()
         }
 
         /// Returns the amount of tokens still locked (not yet vested).
         ///
         /// This method returns the amount of tokens in the locked vault that
         /// have not yet been vested into the pool. This amount decreases over
-        /// time as tokens are vested via the `refill` method.
+        /// time as tokens vest.
         ///
         /// # Returns
         ///
         /// - [`Decimal`] - The amount of locked tokens.
-        pub fn get_locked_vault_amount(&mut self, refill: bool) -> Decimal {
-            if refill {
-                self.refill();
-            }
-            self.locked_tokens_vault.amount()
+        pub fn get_locked_vault_amount(&mut self) -> Decimal {
+            self.state.get_state().locked_tokens_vault.amount()
         }
 
         /// Returns the resource address of the LP tokens.
@@ -788,8 +583,8 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`ResourceAddress`] - The resource address of the LP tokens.
-        pub fn get_pool_unit_resource_address(&self) -> ResourceAddress {
-            self.lp_tokens_vault.resource_address()
+        pub fn get_pool_unit_resource_address(&mut self) -> ResourceAddress {
+            self.state.get_state().lp_tokens_vault.resource_address()
         }
 
         /// Returns the current redemption value for a given amount of LP tokens.
@@ -798,11 +593,6 @@ mod incentives_vester {
         /// specified amount of LP tokens were redeemed at the current time.
         /// The value depends on how much has vested so far and how many LP
         /// tokens have already been redeemed.
-        ///
-        /// Note that this returns the value at the current moment. To get an
-        /// up-to-date value that includes the latest vesting progress, call
-        /// `refill` first or use this after a `redeem` call (which automatically
-        /// calls `refill`).
         ///
         /// # Arguments
         ///
@@ -813,11 +603,8 @@ mod incentives_vester {
         ///
         /// - [`Decimal`] - The amount of tokens that would be received for
         ///   redeeming the specified amount of LP tokens.
-        pub fn get_pool_redemption_value(&mut self, lp_amount: Decimal, refill: bool) -> Decimal {
-            if refill {
-                self.refill();
-            }
-            self.pool.get_redemption_value(lp_amount)
+        pub fn get_pool_redemption_value(&mut self, lp_amount: Decimal) -> Decimal {
+            self.state.get_state().pool.get_redemption_value(lp_amount)
         }
 
         /// Returns the total amount of tokens that have been vested so far.
@@ -830,11 +617,8 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`Decimal`] - The amount of tokens that have been vested.
-        pub fn get_vested_tokens(&mut self, refill: bool) -> Decimal {
-            if refill {
-                self.refill();
-            }
-            self.vested_tokens
+        pub fn get_vested_tokens(&mut self) -> Decimal {
+            self.state.get_state().vested_tokens
         }
 
         /// Returns the total amount of tokens that will be vested over the
@@ -847,11 +631,8 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`Decimal`] - The total amount of tokens to vest.
-        pub fn get_total_tokens_to_vest(&mut self, refill: bool) -> Decimal {
-            if refill {
-                self.refill();
-            }
-            self.total_tokens_to_vest
+        pub fn get_total_tokens_to_vest(&mut self) -> Decimal {
+            self.state.get_state().total_tokens_to_vest
         }
 
         // endregion:Public Methods

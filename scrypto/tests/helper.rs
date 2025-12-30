@@ -68,20 +68,9 @@ impl Helper {
             CompileProfile::Fast,
         )?;
 
-        // Create a dapp definition address
-        let dapp_def_account = env
-            .call_function_typed::<_, AccountCreateOutput>(
-                ACCOUNT_PACKAGE,
-                ACCOUNT_BLUEPRINT,
-                ACCOUNT_CREATE_IDENT,
-                &AccountCreateInput {},
-            )?
-            .0;
-        let dapp_def_address = ComponentAddress::try_from(dapp_def_account.0.clone()).unwrap();
-
         // Instantiate the IncentivesVester component using the test stub
         // Pass None for locker to create a new one via cross-blueprint call
-        let vester = IncentivesVester::instantiate(
+        let mut vester = IncentivesVester::instantiate(
             admin_badge_address,
             super_admin_badge_address,
             vest_duration,
@@ -89,7 +78,6 @@ impl Helper {
             pre_claim_duration,
             token_address,
             None,
-            dapp_def_address,
             package_address,
             &mut env,
         )?;

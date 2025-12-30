@@ -81,30 +81,6 @@ fn test_finish_setup_twice_fails() {
 }
 
 #[test]
-#[should_panic(expected = "Vesting setup not complete yet")]
-fn test_refill_before_setup_fails() {
-    let mut helper = Helper::new().unwrap();
-
-    // This should panic
-    helper.refill().unwrap();
-}
-
-#[test]
-#[should_panic(expected = "Still in pre-claim period")]
-fn test_refill_during_pre_claim_period_fails() {
-    let mut helper = Helper::new().unwrap();
-
-    helper.create_pool_units(dec!("10000")).unwrap();
-    helper.finish_setup().unwrap();
-
-    // Advance to 1 second before vest_start (still in pre-claim period)
-    helper.advance_time_seconds(604799);
-
-    // This should panic
-    helper.refill().unwrap();
-}
-
-#[test]
 fn test_refill_idempotent() -> Result<(), RuntimeError> {
     let mut helper = Helper::new()?;
 
