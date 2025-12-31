@@ -73,9 +73,16 @@ mod incentives_vester {
     /// value for remaining LP token holders, creating an incentive to hold until
     /// full vesting.
     struct IncentivesVester {
-        /// The vesting state. Accessing this through `get_state()` or `get_state_mut()`
-        /// automatically calls `refill()` to ensure values are never stale.
+        /// The vesting state. Consists of state that depends on refilling logic.
+        /// We can only access this through `get_state()` or `get_state_mut()`,
+        /// which automatically calls `refill()` to ensure values are never stale.
         state: VestingState,
+        /// The account locker used to distribute LP tokens to user accounts.
+        /// Not affected by refill, so stored directly on the component.
+        locker: Global<AccountLocker>,
+        /// The vault holding undistributed LP tokens.
+        /// Not affected by refill, so stored directly on the component.
+        lp_tokens_vault: FungibleVault,
     }
 
     impl IncentivesVester {
@@ -185,9 +192,9 @@ mod incentives_vester {
                     vested_tokens: Decimal::ZERO,
                     locked_tokens_vault: FungibleVault::new(token_to_vest),
                     pool,
-                    locker,
-                    lp_tokens_vault: FungibleVault::new(pool_unit_resource_address),
                 }),
+                locker,
+                lp_tokens_vault: FungibleVault::new(pool_unit_resource_address),
             }
             .instantiate()
             .prepare_to_globalize(super_admin_owner_role)
@@ -225,13 +232,15 @@ mod incentives_vester {
         /// as setup can only occur before the vesting process begins.
         pub fn create_pool_units(&mut self, tokens_to_vest: FungibleBucket) {
             let state = self.state.get_state_mut();
-            state.vesting_configuration.assert_vesting_is_uninitialized();
+            state
+                .vesting_configuration
+                .assert_vesting_is_uninitialized();
 
             let amount = tokens_to_vest.amount();
             state.total_tokens_to_vest += amount;
 
             let lp_tokens = state.pool.contribute(tokens_to_vest);
-            state.lp_tokens_vault.put(lp_tokens);
+            self.lp_tokens_vault.put(lp_tokens);
         }
 
         /// Finalizes the setup phase and begins the pre-claim period.
@@ -274,8 +283,11 @@ mod incentives_vester {
                 .unwrap();
             let vest_end = vest_start.add_seconds(vest_duration_seconds).unwrap();
 
-            state.vesting_configuration =
-                VestingConfiguration::new_initialized(vest_start, vest_end, initial_vested_fraction);
+            state.vesting_configuration = VestingConfiguration::new_initialized(
+                vest_start,
+                vest_end,
+                initial_vested_fraction,
+            );
 
             let tokens_to_unvest = state.pool.get_vault_amount();
             let unvested_tokens = state
@@ -298,7 +310,7 @@ mod incentives_vester {
         ///
         /// - [`FungibleBucket`] - A bucket containing all LP tokens from the vault.
         pub fn remove_lp(&mut self) -> FungibleBucket {
-            self.state.get_state_mut().lp_tokens_vault.take_all()
+            self.lp_tokens_vault.take_all()
         }
 
         /// Deposits LP tokens back into the component's internal vault.
@@ -314,7 +326,7 @@ mod incentives_vester {
         /// - `tokens`: [`FungibleBucket`] - A bucket containing the LP tokens
         ///   to deposit into the vault.
         pub fn put_lp(&mut self, tokens: FungibleBucket) {
-            self.state.get_state_mut().lp_tokens_vault.put(tokens);
+            self.lp_tokens_vault.put(tokens);
         }
 
         /// Removes all locked (unvested) tokens from the component.
@@ -415,15 +427,15 @@ mod incentives_vester {
         /// - Called before `finish_setup` has been called
         /// - `lp_token_amount` is zero or negative
         pub fn claim(&mut self, lp_token_amount: Decimal, account_address: Global<Account>) {
-            let state = self.state.get_state_mut();
+            let state = self.state.get_state();
             state.vesting_configuration.assert_vesting_is_initialized();
             assert!(
                 lp_token_amount > Decimal::ZERO,
                 "LP token amount must be greater than zero"
             );
 
-            let lp_tokens = state.lp_tokens_vault.take(lp_token_amount);
-            state.locker.store(account_address, lp_tokens.into(), true);
+            let lp_tokens = self.lp_tokens_vault.take(lp_token_amount);
+            self.locker.store(account_address, lp_tokens.into(), true);
         }
 
         // endregion:Admin Methods
@@ -504,8 +516,8 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`Decimal`] - The amount of unclaimed LP tokens in the vault.
-        pub fn get_lp_token_amount(&mut self) -> Decimal {
-            self.state.get_state().lp_tokens_vault.amount()
+        pub fn get_lp_token_amount(&self) -> Decimal {
+            self.lp_tokens_vault.amount()
         }
 
         /// Returns the projected value of 1 LP token at full maturity.
@@ -583,8 +595,8 @@ mod incentives_vester {
         /// # Returns
         ///
         /// - [`ResourceAddress`] - The resource address of the LP tokens.
-        pub fn get_pool_unit_resource_address(&mut self) -> ResourceAddress {
-            self.state.get_state().lp_tokens_vault.resource_address()
+        pub fn get_pool_unit_resource_address(&self) -> ResourceAddress {
+            self.lp_tokens_vault.resource_address()
         }
 
         /// Returns the current redemption value for a given amount of LP tokens.

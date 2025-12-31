@@ -97,8 +97,34 @@ impl VestingConfiguration {
     }
 }
 
-/// The state of the vesting program with a single PRIVATE field that can't
-/// be accessed unless the proper getter method is called.
+/// A wrapper around [`ResolvedVestingState`] that ensures vesting state is
+/// always up-to-date before being accessed.
+///
+/// # Why This Pattern Exists
+///
+/// The vesting system needs to calculate how many tokens have vested based on
+/// elapsed time. Without this wrapper, callers could accidentally read stale
+/// values from fields like `vested_tokens` or `pool` if they forgot to call
+/// `refill()` first.
+///
+/// By making the inner state private and only accessible through `get_state()`
+/// or `get_state_mut()`, we guarantee at the type system level that `refill()`
+/// is always called before any state access. This prevents an entire class of
+/// bugs where views return outdated values.
+///
+/// # Fields Protected by This Wrapper
+///
+/// The `refill()` method updates:
+/// - `vested_tokens` - the cumulative amount of tokens that have vested
+/// - `locked_tokens_vault` - tokens are taken from here during vesting
+/// - `pool` - vested tokens are deposited here
+///
+/// Other fields (`vesting_configuration`, `total_tokens_to_vest`) don't change
+/// during refill but are included in the wrapper for convenience to avoid
+/// passing them as separate parameters.
+///
+/// Fields that are NOT affected by refill (`locker`, `lp_tokens_vault`) are
+/// stored directly on `IncentivesVester` to avoid the refill overhead.
 #[derive(ScryptoSbor)]
 pub struct VestingState(ResolvedVestingState);
 
@@ -125,8 +151,6 @@ pub struct ResolvedVestingState {
     pub vested_tokens: Decimal,
     pub locked_tokens_vault: FungibleVault,
     pub pool: Global<OneResourcePool>,
-    pub locker: Global<AccountLocker>,
-    pub lp_tokens_vault: FungibleVault,
 }
 
 impl ResolvedVestingState {
