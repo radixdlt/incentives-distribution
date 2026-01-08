@@ -26,8 +26,8 @@ The component uses two types of badges:
 
 ## Setup sequence
 
-### 1a. Instantiate the component & Account Locker
-Create the vester with basic parameters. No tokens required yet.
+### 1. Instantiate the component
+Create the vester with basic parameters. No tokens required yet. You must provide an existing Account Locker.
 
 Parameters:
 - `admin_badge_address` - Address of the admin badge (for backend claiming)
@@ -50,7 +50,7 @@ CALL_FUNCTION
   Decimal("0.2") # initial vested fraction (20%)
   86400i64 # pre-claim period in seconds (1 day)
   Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD
-  Enum<0u8>( ) # no existing locker
+  Address("{account_locker_address}") # existing locker
 ;
 
 CALL_METHOD
@@ -60,30 +60,7 @@ CALL_METHOD
 ;
 ```
 
-### 1b. Instantiate the component with existing Account Locker
-If you want to use an existing Account Locker, that's possible. You'll have to specify a locker:
-```
-CALL_FUNCTION
-  Address("package_tdx_2_1pk03fls3pdjf5dewt0kewhpx9syyj5vd4wq808sffcq5ghjk7svd4y")
-  "IncentivesVester"
-  "instantiate"
-  Address("{admin_badge_address}") # admin badge for backend, create yourself in advance
-  Address("{super_admin_badge_address}") # super admin badge, create yourself in advance
-  2592000i64 # vest duration in seconds (30 days)
-  Decimal("0.2") # initial vested fraction (20%)
-  86400i64 # pre-claim period in seconds (1 day)
-  Address("resource_tdx_2_1tknxxxxxxxxxradxrdxxxxxxxxx009923554798xxxxxxxxxtfd2jc") # XRD
-  Enum<1u8>( Address({account_locker_address}) )
-;
-
-CALL_METHOD
-  Address("{your_account_address}")
-  "deposit_batch"
-  Expression("ENTIRE_WORKTOP")
-;
-```
-
-**IMPORTANT**: When using an existing locker, make sure to add the global caller virtual badge of the vester component to the access rules of the account locker. This is easy via the `add_storer_rule` method on the AccountLockerWrapper component. Do this after instantiating the IncentivesVester.
+**IMPORTANT**: Make sure to add the global caller virtual badge of the vester component to the access rules of the account locker. This is easy via the `add_rule_to_role` method on the AccountLockerWrapper component. Do this after instantiating the IncentivesVester.
 
 ### 2. Fill the pool with tokens
 Add tokens to create LP tokens. Can be done multiple times before finishing setup.
@@ -396,7 +373,7 @@ After the vesting component is instantiated, metadata needs to be set on:
 | `dapp_definition` | `Address` | dapp definition address of incentives |
 
 ### The Account Locker
-You can skip this if you instantiated without creating a new locker. Make sure to add the storer rule to the already existing locker though (see 1b of setup)!
+You can skip this if you're reusing an existing locker that already has metadata set. Make sure to add the storer rule to the locker though (see step 1 of setup)!
 
 |field| type | description |
 |--|--|--|
