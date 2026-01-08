@@ -1,6 +1,5 @@
 use scrypto::prelude::*;
 
-use crate::account_locker::account_locker_blueprint::*;
 use crate::vesting_state::{ResolvedVestingState, VestingConfiguration, VestingState};
 
 #[blueprint]
@@ -124,10 +123,8 @@ mod incentives_vester {
         ///   LP tokens can be distributed but not redeemed. Must be non-negative.
         /// - `token_to_vest`: [`ResourceAddress`] - The address of the fungible
         ///   token resource that will be vested to users.
-        /// - `locker`: [`Option<Global<AccountLocker>>`] - Optional existing
-        ///   AccountLocker component to use. If `None`, a new AccountLocker will
-        ///   be created via cross-blueprint call with the super_admin badge as
-        ///   owner. If `Some`, the provided AccountLocker will be used.
+        /// - `locker`: [`Global<AccountLocker>`] - The AccountLocker component
+        ///   to use for storing LP tokens when distributing to user accounts.
         ///
         /// # Returns
         ///
@@ -147,7 +144,7 @@ mod incentives_vester {
             initial_vested_fraction: Decimal,
             pre_claim_duration_seconds: i64,
             token_to_vest: ResourceAddress,
-            locker: Option<Global<AccountLocker>>,
+            locker: Global<AccountLocker>,
         ) -> Global<IncentivesVester> {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(IncentivesVester::blueprint_id());
@@ -158,16 +155,6 @@ mod incentives_vester {
                 require(super_admin_badge_address) || require(global_caller(component_address))
             );
             let super_admin_owner_role = OwnerRole::Fixed(super_admin_access_rule.clone());
-
-            // Use the provided locker or create a new one via cross-blueprint call
-            let locker = match locker {
-                Some(existing_locker) => existing_locker,
-                None => {
-                    let (_locker_wrapper, locker) =
-                        AccountLockerWrapper::instantiate(super_admin_access_rule.clone());
-                    locker
-                }
-            };
 
             let pool = Blueprint::<OneResourcePool>::instantiate(
                 super_admin_owner_role.clone(),

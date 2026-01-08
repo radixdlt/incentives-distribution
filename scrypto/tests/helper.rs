@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
 use incentives_vester::incentives_vester::incentives_vester_test::*;
-use dummy_account::incentives_vester_test::*;
+use dummy_blueprints::dummy_account_blueprint_test::*;
+use dummy_blueprints::dummy_locker_blueprint_test::*;
 use scrypto_test::prelude::*;
 
 /// Standard tolerance for approximate decimal comparisons in tests
@@ -63,13 +64,19 @@ impl Helper {
         )?;
 
         let dummy_account_package = PackageFactory::compile_and_publish(
-            "./dummy_account",
+            "./dummy_blueprints",
             &mut env,
             CompileProfile::Fast,
         )?;
 
+        // Instantiate a dummy locker for testing
+        let (_dummy_locker_wrapper, locker) = DummyLocker::instantiate_locker(
+            dummy_account_package,
+            &mut env,
+        )?;
+
         // Instantiate the IncentivesVester component using the test stub
-        // Pass None for locker to create a new one via cross-blueprint call
+        // Pass the locker we just created
         let mut vester = IncentivesVester::instantiate(
             admin_badge_address,
             super_admin_badge_address,
@@ -77,7 +84,7 @@ impl Helper {
             initial_vested_fraction,
             pre_claim_duration,
             token_address,
-            None,
+            locker.into(),
             package_address,
             &mut env,
         )?;

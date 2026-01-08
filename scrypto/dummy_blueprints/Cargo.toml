@@ -1,5 +1,5 @@
 [package]
-name = "dummy_account"
+name = "dummy_blueprints"
 version = "1.0.0"
 edition = "2021"
 

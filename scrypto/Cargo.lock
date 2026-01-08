@@ -414,7 +414,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
-name = "dummy_account"
+name = "dummy_blueprints"
 version = "1.0.0"
 dependencies = [
  "base64ct",
@@ -610,7 +610,7 @@ name = "incentives-vester"
 version = "1.0.0"
 dependencies = [
  "base64ct",
- "dummy_account",
+ "dummy_blueprints",
  "indexmap 2.7.0",
  "scrypto",
  "scrypto-test",
