@@ -1,9 +1,5 @@
 # Incentives Vester Blueprint
-This blueprint has been deployed for testing purposes.
-
-Stokenet: `package_tdx_2_1phmy4mhjxnger3e2facgd0rkyd8hrjxyhlmsesz2d8mxh88v2dz2cx`
-
-Mainnet: `package_rdx1p4cwxas2khrv7ah5tral57qgftwszkwps7uz6e7lkwtjp89tu05nr6`
+Mainnet: `package_rdx1p5vkjuvutjwl90zfkf3sr5p6tq0lyhr3v702frru0w03rht2am6z0q`
 
 ## How this works
 
