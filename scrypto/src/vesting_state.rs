@@ -151,10 +151,16 @@ pub struct ResolvedVestingState {
     pub vested_tokens: Decimal,
     pub locked_tokens_vault: FungibleVault,
     pub pool: Global<OneResourcePool>,
+    pub kill_switch_enabled: bool,
 }
 
 impl ResolvedVestingState {
     fn refill(&mut self) {
+        // Kill switch is active - don't refill
+        if self.kill_switch_enabled {
+            return;
+        }
+
         let VestingConfiguration::Initialized {
             vest_start,
             vest_end,

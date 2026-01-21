@@ -25,6 +25,7 @@ mod incentives_vester {
             get_total_tokens_to_vest => PUBLIC;
             // Admin methods
             claim => restrict_to: [super_admin, admin];
+            toggle_kill_switch => restrict_to: [super_admin, admin];
             // Super admin methods
             finish_setup => restrict_to: [super_admin];
             create_pool_units => restrict_to: [super_admin];
@@ -82,6 +83,10 @@ mod incentives_vester {
         /// The vault holding undistributed LP tokens.
         /// Not affected by refill, so stored directly on the component.
         lp_tokens_vault: FungibleVault,
+        /// Vault to hold tokens when the kill switch is activated.
+        /// Tokens are moved here from the pool to prevent redemptions.
+        /// Not affected by refill, so stored directly on the component.
+        emergency_vault: FungibleVault,
     }
 
     impl IncentivesVester {
@@ -179,9 +184,11 @@ mod incentives_vester {
                     vested_tokens: Decimal::ZERO,
                     locked_tokens_vault: FungibleVault::new(token_to_vest),
                     pool,
+                    kill_switch_enabled: false,
                 }),
                 locker,
                 lp_tokens_vault: FungibleVault::new(pool_unit_resource_address),
+                emergency_vault: FungibleVault::new(token_to_vest),
             }
             .instantiate()
             .prepare_to_globalize(super_admin_owner_role)
@@ -425,6 +432,48 @@ mod incentives_vester {
             self.locker.store(account_address, lp_tokens.into(), true);
         }
 
+        /// Toggles the kill switch to enable or disable emergency mode.
+        ///
+        /// When the kill switch is **enabled**:
+        /// - All tokens are withdrawn from the pool and stored in the emergency vault
+        /// - The `refill` method stops vesting new tokens
+        /// - The `redeem` method is blocked, preventing users from redeeming pool units
+        ///   (through the component, they can still redeem the pool units manually)
+        ///
+        /// When the kill switch is **disabled** (toggled off):
+        /// - All tokens are moved from the emergency vault back to the pool
+        /// - Normal vesting and redemption operations resume
+        ///
+        /// This method can be called multiple times to toggle between states.
+        /// It is designed as an emergency measure to protect funds if issues are
+        /// discovered with the vesting system.
+        ///
+        /// # Returns
+        ///
+        /// - [`bool`] - The new state of the kill switch (true = enabled, false = disabled)
+        pub fn toggle_kill_switch(&mut self) -> bool {
+            let state = self.state.get_state_mut();
+
+            if state.kill_switch_enabled {
+                // Disable kill switch: move tokens from emergency vault back to pool
+                let tokens = self.emergency_vault.take_all();
+                state.pool.protected_deposit(tokens);
+                state.kill_switch_enabled = false;
+            } else {
+                // Enable kill switch: move all tokens from pool to emergency vault
+                let pool_amount = state.pool.get_vault_amount();
+                if pool_amount > Decimal::ZERO {
+                    let tokens = state
+                        .pool
+                        .protected_withdraw(pool_amount, WithdrawStrategy::Exact);
+                    self.emergency_vault.put(tokens);
+                }
+                state.kill_switch_enabled = true;
+            }
+
+            state.kill_switch_enabled
+        }
+
         // endregion:Admin Methods
 
         // region:Public Methods
@@ -484,14 +533,20 @@ mod incentives_vester {
         ///
         /// # Panics
         ///
-        /// This method will panic if the LP token bucket is empty (contains zero
-        /// tokens).
+        /// This method will panic if:
+        /// - The LP token bucket is empty (contains zero tokens)
+        /// - The kill switch is enabled
         pub fn redeem(&mut self, lp_token_bucket: FungibleBucket) -> FungibleBucket {
+            let state = self.state.get_state_mut();
+            assert!(
+                !state.kill_switch_enabled,
+                "Redemptions are disabled while the kill switch is active"
+            );
             assert!(
                 lp_token_bucket.amount() > Decimal::ZERO,
                 "LP bucket must contain some amount"
             );
-            self.state.get_state_mut().pool.redeem(lp_token_bucket)
+            state.pool.redeem(lp_token_bucket)
         }
 
         /// Returns the amount of LP tokens in the component's internal vault.
