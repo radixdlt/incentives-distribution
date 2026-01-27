@@ -1,5 +1,5 @@
 # Incentives Vester Blueprint
-Mainnet: `package_rdx1p5vkjuvutjwl90zfkf3sr5p6tq0lyhr3v702frru0w03rht2am6z0q`
+Mainnet: `package_rdx1p558dn4g5my70z3q8mz6grl07wm02lzuumyqrwz0mdx45jz670yc7a`
 
 ## How this works
 
